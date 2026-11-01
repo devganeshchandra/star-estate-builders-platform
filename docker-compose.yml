@@ -1,0 +1,28 @@
+# Optional local PostgreSQL for machines without a native install (see LOCAL_SETUP.md).
+#
+#   docker compose up -d        start (data survives restarts in the named volume)
+#   docker compose stop         stop
+#   docker compose down         remove the container, keep the data
+#   docker compose down -v      remove the container AND the data
+#
+# Matches .env: DB_NAME, DB_USER, DB_PASSWORD (required), DB_PORT.
+services:
+  db:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-m3m_platform}
+      POSTGRES_USER: ${DB_USER:-m3m}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

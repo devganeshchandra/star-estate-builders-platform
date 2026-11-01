@@ -10,7 +10,7 @@
 <main id="main-content">
   {% include "home/hero.html" %}
   {% include "home/projects.html" %}
-  {% include "home/billionaire_teaser.html" %}
+  {% if billionaire %}{% include "home/billionaire_teaser.html" %}{% endif %}
   {% include "home/journey.html" %}
   {% include "home/news.html" %}
   {% include "home/media.html" %}

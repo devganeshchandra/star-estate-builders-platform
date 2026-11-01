@@ -1,18 +1,18 @@
 {% load static %}
 <header class="site-header" data-site-header>
   <div class="site-header__inner">
-    <a class="wordmark" href="/" aria-label="M3M India home" data-home-link>
-      <img
+    <a class="wordmark" href="/" aria-label="{{ site.site_name }} home" data-home-link>
+      {% if site.logo %}<img
         alt=""
         class="wordmark__logo wordmark__logo--color"
         height="56"
         width="180"
-        src="{% static 'images/logo/m3m-logo.png' %}"
-        data-logo-color="{% static 'images/logo/m3m-logo.png' %}"
-        data-logo-transparent="{% static 'images/logo/logo_tranparent.webp' %}"
+        src="{{ site.logo.url }}"
+        data-logo-color="{{ site.logo.url }}"
+        data-logo-transparent="{% if site.logo_light %}{{ site.logo_light.url }}{% else %}{{ site.logo.url }}{% endif %}"
         fetchpriority="high"
       >
-      <span class="visually-hidden">M3M India</span>
+      <span class="visually-hidden">{{ site.site_name }}</span>{% else %}<span class="wordmark__text">{{ site.site_name }}</span>{% endif %}
     </a>
 
     <nav class="desktop-nav" aria-label="Main navigation">
@@ -46,7 +46,7 @@
 
     <div class="site-header__actions">
       <a class="header-phone" href="tel:{{ site.phone_dial }}">{{ site.phone_display }}</a>
-      <a aria-label="Chat with M3M India on WhatsApp" class="header-whatsapp" href="{{ site.whatsapp_url }}" rel="noreferrer" target="_blank">
+      <a aria-label="Chat with {{ site.site_name }} on WhatsApp" class="header-whatsapp" href="{{ site.whatsapp_url }}" rel="noreferrer" target="_blank">
         {% include "icons/whatsapp.html" %}
       </a>
       <button aria-haspopup="dialog" class="header-consultation" data-enquiry-open type="button">

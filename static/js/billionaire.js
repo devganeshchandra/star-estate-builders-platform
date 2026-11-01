@@ -648,10 +648,40 @@
     return now.toISOString().slice(0, 10);
   }
 
-  function fillTracking(form) {
+  // Campaign and ad click details: from this page's link, or kept from the link the visit began with
+  // (the same keys as static/js/site.js).
+  var TRACKING = {
+    utm_term: ["utm_term", "keyword"],
+    tbclid: ["tblci", "tbclid", "tbcli"],
+  };
+
+  function trackingValues() {
     var params = new URLSearchParams(window.location.search);
+    var stored = {};
+    try {
+      stored = JSON.parse(sessionStorage.getItem("m3m-utm") || "{}");
+    } catch (error) {
+      stored = {};
+    }
+    var found = {};
+    $all("[data-utm]").forEach(function (input) {
+      var keys = TRACKING[input.name] || [input.name];
+      var name = keys.filter(function (key) { return params.get(key); })[0];
+      if (name) found[input.name] = params.get(name).slice(0, 255);
+    });
+    if (!Object.keys(found).length) return stored;
+    try {
+      sessionStorage.setItem("m3m-utm", JSON.stringify(found));
+    } catch (error) {
+      /* Storage unavailable: the values still go with this page's forms. */
+    }
+    return found;
+  }
+
+  function fillTracking(form) {
+    var values = trackingValues();
     $all("[data-utm]", form).forEach(function (input) {
-      input.value = params.get(input.name) || "";
+      input.value = values[input.name] || "";
     });
     var pageUrl = $("[data-page-url]", form);
     if (pageUrl) pageUrl.value = window.location.href;

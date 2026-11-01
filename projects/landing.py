@@ -1,8 +1,10 @@
 """Custom landing pages whose every text, image and list is edited in the admin.
 
-Each page has a module in projects/landing_pages/ describing its content slots and their starting
-content. seed() turns those into LandingPage rows (it runs from a migration, so `migrate` is enough
-on any machine); context() hands them to the page's template as:
+Each page design (template) has a module in projects/landing_pages/ describing its content slots and their
+starting content, and a template file templates/projects/landing/<design>.html (Billionaire Block and the
+shared website texts have their own templates). Any builder can use any design: a LandingPage row records its
+builder, its project and its design, and fill_page() gives a new page the design's starting content to edit.
+context() hands a page's content to its template as:
 
     t.<key>              a text; render with |em to turn *stars* into italics
     imgs.<key>.image     a single picture, with imgs.<key>.alt; render with |src:<width>
@@ -20,11 +22,19 @@ from django.core.files.storage import default_storage
 from projects.landing_pages import billionaire, cullinan, jacob, site, trump
 
 PAGES = {module.SLUG: module for module in (jacob, cullinan, trump, billionaire, site)}
+# Designs for a project's landing page (the other two are builder-wide pages with their own views).
+PROJECT_TEMPLATES = {key: module for key, module in PAGES.items() if key not in (billionaire.SLUG, site.SLUG)}
+BILLIONAIRE = billionaire.SLUG
+WEBSITE_TEXTS = site.SLUG
 
 
-def list_choices(slug=None):
-    """(key, name) of the lists on one page, or on every page."""
-    modules = [PAGES[slug]] if slug in PAGES else PAGES.values()
+def template_choices():
+    return [(key, module.NAME) for key, module in PROJECT_TEMPLATES.items()]
+
+
+def list_choices(template=None):
+    """(key, name) of the lists of one design, or of every design."""
+    modules = [PAGES[template]] if template in PAGES else PAGES.values()
     choices = {}
     for module in modules:
         for key, (name, _help) in module.LISTS.items():
@@ -32,16 +42,16 @@ def list_choices(slug=None):
     return sorted(choices.items(), key=lambda choice: choice[1])
 
 
-def list_help(slug):
-    module = PAGES.get(slug)
+def list_help(template):
+    module = PAGES.get(template)
     return [(name, help_text) for name, help_text in module.LISTS.values()] if module else []
 
 
-def _copy_static(module, filename):
+def _copy_static(module, filename, folder=None):
     """Copy a starting image from static/ into the media folder, where the admin can replace it."""
     if not filename:
         return ""
-    name = f"landing/{module.SLUG}/{Path(filename).name}"
+    name = f"{folder or 'landing/' + module.SLUG}/{Path(filename).name}"
     if not default_storage.exists(name):
         with open(Path(settings.BASE_DIR) / "static" / module.STATIC_DIR / filename, "rb") as source:
             name = default_storage.save(name, File(source))
@@ -50,7 +60,10 @@ def _copy_static(module, filename):
 
 def seed(apps=None):
     """Create any missing page, text and image. Lists are filled only when their page is new,
-    so items the content team deleted do not come back. Never overwrites edited content."""
+    so items the content team deleted do not come back. Never overwrites edited content.
+
+    Used by the migrations written before the site served several builders (they created the first builder's
+    pages); new pages are created in the admin and filled by fill_page()."""
     get_model = (apps or django_apps).get_model
     LandingPage = get_model("projects", "LandingPage")
     LandingText = get_model("projects", "LandingText")
@@ -115,11 +128,57 @@ def replace_texts(apps, slug, changes):
         LandingText.objects.filter(page__slug=slug, key=key, value=old).update(value=new)
 
 
-def context(slug, rera=""):
-    """Template context for a landing page, or None when the page has no content in the admin."""
+def fill_page(page):
+    """Give a new landing page its design's starting texts, pictures and lists. Pictures are copied into the
+    builder's own media folder. Slots the page already has are left as they are."""
+    from projects.models import LandingImage, LandingItem, LandingText
+
+    module = PAGES.get(page.template)
+    if module is None:
+        return
+    folder = f"builders/{page.builder.slug}/landing/{module.SLUG}"
+    for order, (section, key, label, value) in enumerate(module.TEXTS):
+        LandingText.objects.get_or_create(
+            page=page, key=key, defaults={"section": section, "label": label, "value": value, "order": order}
+        )
+    for order, (section, key, label, filename, alt) in enumerate(module.IMAGES):
+        LandingImage.objects.get_or_create(
+            page=page,
+            key=key,
+            defaults={
+                "section": section, "label": label, "image": _copy_static(module, filename, folder), "alt": alt,
+                "order": order,
+            },
+        )
+    if not page.items.exists():
+        for list_key, items in module.ITEMS.items():
+            for order, item in enumerate(items):
+                item = dict(item)
+                item["image"] = _copy_static(module, item.get("image", ""), folder)
+                LandingItem.objects.create(page=page, list_key=list_key, order=order, **item)
+
+
+def link_projects(builder):
+    """A project's own landing page used to be found by sharing the project's slug. Make that link explicit for
+    pages that do not have a project yet (e.g. after loading starting content on a new database)."""
+    from projects.models import LandingPage, Project
+
+    for page in LandingPage.objects.for_builder(builder).filter(project__isnull=True, template__in=PROJECT_TEMPLATES):
+        project = Project.objects.for_builder(builder).filter(slug=page.slug).first()
+        if project is not None and not project.landing_pages.filter(is_default=True).exists():
+            page.project, page.is_default = project, True
+            page.save(update_fields=["project", "is_default", "updated_at"])
+
+
+def builder_page(builder, template):
+    """A builder-wide page (the shared website texts, Billionaire Block) of this builder, or None."""
     from projects.models import LandingPage
 
-    page = LandingPage.objects.filter(slug=slug).first()
+    return LandingPage.objects.for_builder(builder).filter(project__isnull=True, template=template).first()
+
+
+def context(page, rera=""):
+    """Template context for a landing page, or None when there is no page."""
     if page is None:
         return None
 

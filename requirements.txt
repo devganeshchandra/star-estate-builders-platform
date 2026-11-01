@@ -8,5 +8,5 @@ whitenoise==6.12.0
 # Production web server (Linux). On Windows servers use waitress instead.
 gunicorn==23.0.0; sys_platform != "win32"
 
-# PostgreSQL driver (the production database)
+# PostgreSQL driver (only used when DB_ENGINE=postgres; the site runs on SQLite by default)
 psycopg[binary]==3.3.6

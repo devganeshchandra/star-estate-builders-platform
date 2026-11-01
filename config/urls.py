@@ -1,17 +1,17 @@
 from django.conf import settings
 from django.contrib import admin
-from django.contrib.sitemaps.views import sitemap
 from django.urls import include, path, re_path
 from django.views.static import serve
 
-from core.sitemaps import sitemaps
-from core.views import robots_txt
+from core.sitemaps import builder_sitemap
+from core.views import healthz, robots_txt
 from leads.views import submit_enquiry
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/enquiries", submit_enquiry, name="submit_enquiry"),
-    path("sitemap.xml", sitemap, {"sitemaps": sitemaps}, name="sitemap"),
+    path("sitemap.xml", builder_sitemap, name="sitemap"),
+    path("healthz", healthz),
     path("robots.txt", robots_txt),
     path("", include("projects.urls")),
     path("", include("content.urls")),

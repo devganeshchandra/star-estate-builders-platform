@@ -49,6 +49,10 @@ def edit_this_page(context):
     if not request or not getattr(request.user, "is_staff", False):
         return {"show": False}
     from core.site_map import edits_for_path
+    from tenants import access
 
-    name, edits = edits_for_path(request.path)
+    builder = getattr(request, "builder", None)
+    if builder is None or not access.builders_for(request.user, access.CONTENT).filter(pk=builder.pk).exists():
+        return {"show": False}
+    name, edits = edits_for_path(request.builder, request.path)
     return {"show": True, "name": name, "edits": edits}

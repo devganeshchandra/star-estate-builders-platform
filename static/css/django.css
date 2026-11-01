@@ -293,3 +293,13 @@ form[aria-busy="true"] button[type="submit"] {
     animation: none;
   }
 }
+
+/* Builders without a logo image (Contact & site settings → Logo) show their name as the wordmark. */
+.wordmark__text {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  white-space: nowrap;
+}

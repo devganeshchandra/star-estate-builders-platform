@@ -22,9 +22,7 @@
   <meta property="og:url" content="{{ site_url }}{{ request.path }}">
   {% if page.hero_image %}<meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{{ page.hero_image.url }}">{% endif %}
   <meta name="twitter:card" content="summary_large_image">
-  <link rel="icon" href="{% static 'images/logo/favicon.ico' %}" sizes="any">
-  <link rel="icon" type="image/png" sizes="96x96" href="{% static 'images/logo/favicon-96.png' %}">
-  <link rel="apple-touch-icon" href="{% static 'images/logo/apple-touch-icon.png' %}">
+{% include "partials/brand_head.html" %}
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..700;1,6..96,400..600&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Manrope:wght@400;500;600;700&display=swap">

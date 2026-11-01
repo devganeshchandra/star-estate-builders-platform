@@ -32,9 +32,23 @@ SECRET_KEY = os.environ.get(
 if not SECRET_KEY:
     raise RuntimeError("DJANGO_SECRET_KEY must be set when DJANGO_DEBUG is off.")
 
-ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
+# Every builder domain must be listed here as well as in the admin (Builders & domains → Domains): this list is
+# Django's first check of the Host header, the Domain table decides which builder answers. A leading dot allows
+# sub-domains, e.g. ".localhost" for m3m.localhost and ace.localhost on a development machine.
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,.localhost")
 CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS")
-SITE_URL = os.environ.get("SITE_URL", "https://www.m3mindia.com").rstrip("/")
+
+# Multi-builder hosting (tenants/middleware.py). Host names that serve only the admin, with no builder website,
+# e.g. admin.yourcompany.in. The admin also works on every builder domain.
+PLATFORM_ADMIN_HOSTS = env_list("PLATFORM_ADMIN_HOSTS", "admin.localhost")
+# Paths answered without a builder (load balancer / uptime checks).
+TENANT_EXEMPT_PATHS = {"/healthz"}
+# How long each web process remembers which builder a host name belongs to; admin edits apply immediately in the
+# process that saved them and within this many seconds everywhere else.
+TENANT_CACHE_SECONDS = int(os.environ.get("TENANT_CACHE_SECONDS", "60"))
+# Links in emails and canonical addresses use https unless this says otherwise (e.g. "http" on a laptop).
+SITE_SCHEME = os.environ.get("SITE_SCHEME", "https")
+PLATFORM_NAME = os.environ.get("PLATFORM_NAME", "Builder websites")
 
 INSTALLED_APPS = [
     "unfold",
@@ -49,6 +63,7 @@ INSTALLED_APPS = [
     "whitenoise.runserver_nostatic",
     "django.contrib.staticfiles",
     "django.contrib.sitemaps",
+    "tenants",
     "core",
     "projects",
     "content",
@@ -58,6 +73,9 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
+    # Which builder's website this is, from the host name. After WhiteNoise (static files need no builder),
+    # before everything that shows or saves builder data.
+    "tenants.middleware.TenantMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -86,9 +104,10 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-# Database: PostgreSQL in production (DB_ENGINE=postgres and the DB_* settings in .env); SQLite only
-# when DB_ENGINE is not set, e.g. for a quick look on a laptop. See docs/DATABASE.md.
-if os.environ.get("DB_ENGINE", "sqlite").lower() in {"postgres", "postgresql"}:
+# Database: PostgreSQL, one database shared by every builder (DB_* settings in .env). DB_ENGINE=sqlite opens an
+# SQLite file (db.sqlite3, or DB_PATH): the original file is kept for rolling back with the code from before the
+# multi-builder change, never to be migrated in place. See docs/DATABASE_MIGRATION.md.
+if os.environ.get("DB_ENGINE", "postgres").lower() in {"postgres", "postgresql"}:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
@@ -112,7 +131,19 @@ else:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
+            "NAME": os.environ.get("DB_PATH") or BASE_DIR / "db.sqlite3",
+            "OPTIONS": {
+                # Two leads sent at the same moment: the second waits up to 20 seconds for its turn rather than
+                # failing with "database is locked". IMMEDIATE takes the write lock at the start of a transaction,
+                # so a waiting write never fails half-way.
+                "timeout": 20,
+                "transaction_mode": "IMMEDIATE",
+                # WAL: pages keep loading while a lead is being saved. NORMAL is safe with WAL and much faster.
+                "init_command": (
+                    "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=20000;"
+                    " PRAGMA cache_size=-20000; PRAGMA temp_store=MEMORY"
+                ),
+            },
         }
     }
 
@@ -159,8 +190,8 @@ CACHES = {
 IMAGE_MAX_UPLOAD_WIDTH = 2560
 IMAGE_RENDITION_WIDTHS = (480, 828, 1200, 1920)
 
-# Lead notifications: comma-separated recipients. Leave empty to only store
-# enquiries in the admin.
+# Lead notifications. Each builder's own inbox is in its settings (admin); these comma-separated addresses get a
+# copy of every builder's leads (e.g. the platform's operations team). Leave empty for none.
 LEAD_NOTIFICATION_EMAILS = env_list("LEAD_NOTIFICATION_EMAILS")
 LEAD_RATE_LIMIT_PER_HOUR = int(os.environ.get("LEAD_RATE_LIMIT_PER_HOUR", "20"))
 
@@ -175,7 +206,7 @@ EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
 EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
-DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "M3M India <no-reply@m3mindia.com>")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", f"{PLATFORM_NAME} <no-reply@localhost>")
 
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
@@ -191,27 +222,18 @@ LOGGING = {
     "disable_existing_loggers": False,
     "handlers": {"console": {"class": "logging.StreamHandler"}},
     "root": {"handlers": ["console"], "level": "INFO"},
+    # Requests for host names outside ALLOWED_HOSTS are refused (400); scanners send many, so keep them quiet.
+    "loggers": {"django.security.DisallowedHost": {"handlers": ["console"], "level": "ERROR", "propagate": False}},
 }
 
-def _site_map(name, *args):
-    """A sidebar link worked out when the page is shown (core/site_map.py), e.g. a landing page's edit screen."""
-
-    def link(request):
-        from core import site_map
-
-        return getattr(site_map, name)(*args)
-
-    return link
-
-
 UNFOLD = {
-    "SITE_TITLE": "M3M India Admin",
-    "SITE_HEADER": "M3M India",
-    "SITE_SUBHEADER": "Website content & enquiries",
+    "SITE_TITLE": f"{PLATFORM_NAME} admin",
+    "SITE_HEADER": PLATFORM_NAME,
+    "SITE_SUBHEADER": "Builders, websites & enquiries",
     "SITE_URL": "/",
     "SITE_SYMBOL": "apartment",
     "SITE_FAVICONS": [
-        {"rel": "icon", "type": "image/png", "href": lambda request: static("images/logo/m3m-logo.png")},
+        {"rel": "icon", "type": "image/png", "href": lambda request: static("images/logo/icon-512.png")},
     ],
     "SHOW_HISTORY": True,
     "SHOW_VIEW_ON_SITE": True,
@@ -247,22 +269,15 @@ UNFOLD = {
                 "title": "Main website pages",
                 "items": [
                     {"title": "Homepage", "icon": "home", "link": reverse_lazy("admin:core_homepage_changelist")},
-                    {"title": "Projects page", "icon": "apartment", "link": _site_map("inner_page_url", "projects")},
-                    {"title": "Our Journey page", "icon": "timeline", "link": _site_map("inner_page_url", "journey")},
-                    {"title": "Media Centre page", "icon": "collections", "link": _site_map("inner_page_url", "media")},
-                    {"title": "Insights page", "icon": "lightbulb", "link": _site_map("inner_page_url", "insights")},
-                    {"title": "Contact page", "icon": "call", "link": _site_map("inner_page_url", "contact")},
+                    {"title": "Menu pages (Projects, Journey, Media…)", "icon": "web", "link": reverse_lazy("admin:core_innerpage_changelist")},
                     {"title": "Legal pages (disclaimer, privacy…)", "icon": "description", "link": reverse_lazy("admin:core_page_changelist")},
                 ],
             },
             {
                 "title": "Project landing pages",
                 "items": [
-                    {"title": "Jacob & Co. Residences", "icon": "diamond", "link": _site_map("landing_page_url", "m3m-jacob-co-residences")},
-                    {"title": "The Cullinan", "icon": "diamond", "link": _site_map("landing_page_url", "m3m-the-cullinan-residential")},
-                    {"title": "Trump Tower Noida", "icon": "diamond", "link": _site_map("landing_page_url", "m3m-trump-tower-noida")},
+                    {"title": "All landing pages (add one here)", "icon": "diamond", "link": reverse_lazy("admin:projects_landingpage_changelist")},
                     {"title": "Billionaire Block: banner & form", "icon": "workspace_premium", "link": reverse_lazy("admin:projects_billionaireblockpage_changelist")},
-                    {"title": "Billionaire Block: sections", "icon": "workspace_premium", "link": _site_map("landing_page_url", "billionaire-block")},
                 ],
             },
             {
@@ -290,8 +305,16 @@ UNFOLD = {
             {
                 "title": "On every page",
                 "items": [
-                    {"title": "Menu, footer & popup texts", "icon": "menu", "link": _site_map("landing_page_url", "website-texts")},
-                    {"title": "Phone, address & search settings", "icon": "settings", "link": reverse_lazy("admin:core_sitesettings_changelist")},
+                    {"title": "Menu, footer & popup texts", "icon": "menu", "link": lambda request: f"{reverse_lazy('admin:projects_landingpage_changelist')}?project__isnull=True"},
+                    {"title": "Phone, address, logo & tags", "icon": "settings", "link": reverse_lazy("admin:core_sitesettings_changelist")},
+                ],
+            },
+            {
+                "title": "Builders (superusers)",
+                "items": [
+                    {"title": "Builders", "icon": "business", "link": reverse_lazy("admin:tenants_builder_changelist"), "permission": lambda request: request.user.is_superuser},
+                    {"title": "Domains", "icon": "language", "link": reverse_lazy("admin:tenants_domain_changelist"), "permission": lambda request: request.user.is_superuser},
+                    {"title": "Who works on which builder", "icon": "badge", "link": reverse_lazy("admin:tenants_buildermembership_changelist"), "permission": lambda request: request.user.is_superuser},
                 ],
             },
             {
@@ -304,3 +327,4 @@ UNFOLD = {
         ],
     },
 }
+TEST_RUNNER = "config.test_runner.TenantTestRunner"

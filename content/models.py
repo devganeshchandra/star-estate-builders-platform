@@ -6,9 +6,15 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.images import ResizingImageField
+from tenants.query import BuilderUploadTo, TenantQuerySet
 
 
 class OrderedModel(models.Model):
+    builder = models.ForeignKey("tenants.Builder", on_delete=models.PROTECT, related_name="+")
+    tenant_path = "builder"
+
+    objects = TenantQuerySet.as_manager()
+
     order = models.PositiveIntegerField(default=0, help_text="Lower numbers appear first.")
     is_published = models.BooleanField("Show on site", default=True)
 
@@ -45,7 +51,7 @@ class Milestone(OrderedModel):
     marker = models.CharField(max_length=30, help_text="Short label on the timeline, e.g. “2010” or “Today”.")
     title = models.CharField(max_length=140)
     description = models.TextField(blank=True)
-    image = ResizingImageField(upload_to="milestones/", blank=True)
+    image = ResizingImageField(upload_to=BuilderUploadTo("milestones"), blank=True)
 
     class Meta(OrderedModel.Meta):
         verbose_name = "Journey milestone"
@@ -55,17 +61,25 @@ class Milestone(OrderedModel):
 
 
 class Publication(models.Model):
-    """A newspaper or website that covered M3M; its logo is shown on news cards."""
+    """A newspaper or website that covered the builder; its logo is shown on news cards."""
 
-    name = models.CharField(max_length=80, unique=True)
+    builder = models.ForeignKey("tenants.Builder", on_delete=models.PROTECT, related_name="+")
+    tenant_path = "builder"
+
+    objects = TenantQuerySet.as_manager()
+
+    name = models.CharField(max_length=80)
     logo = ResizingImageField(
-        upload_to="press/logos/",
+        upload_to=BuilderUploadTo("press/logos"),
         help_text="Official logo, ideally a wide PNG with a transparent or white background.",
     )
     website = models.URLField(blank=True)
 
     class Meta:
         ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(fields=["builder", "name"], name="content_publication_unique_name_per_builder")
+        ]
 
     def __str__(self):
         return self.name
@@ -77,7 +91,7 @@ class PressItem(OrderedModel):
     published_on = models.DateField()
     summary = models.TextField(help_text="One or two sentences on what the article reports.")
     image = ResizingImageField(
-        upload_to="press/", blank=True, help_text="Optional. Shown only if the publication has no logo."
+        upload_to=BuilderUploadTo("press"), blank=True, help_text="Optional. Shown only if the publication has no logo."
     )
     article_url = models.URLField(max_length=2000, help_text="Link to the article on the publication's website.")
 
@@ -101,7 +115,7 @@ class MediaImage(OrderedModel):
         AMENITIES = "amenities", "Amenities"
         OUTDOORS = "outdoors", "Outdoors & leisure"
 
-    image = ResizingImageField(upload_to="media-gallery/")
+    image = ResizingImageField(upload_to=BuilderUploadTo("media-gallery"))
     caption = models.CharField(max_length=160)
     category = models.CharField(max_length=20, choices=Category.choices, default=Category.ARCHITECTURE)
 
@@ -130,10 +144,10 @@ class Video(OrderedModel):
 
 
 class Insight(OrderedModel):
-    image = ResizingImageField(upload_to="insights/")
+    image = ResizingImageField(upload_to=BuilderUploadTo("insights"))
     category = models.CharField(max_length=80)
     title = models.CharField(max_length=160)
-    slug = models.SlugField(unique=True, max_length=160, help_text="Page address: /insights/<slug>")
+    slug = models.SlugField(max_length=160, help_text="Page address: /insights/<slug>")
     description = models.TextField(help_text="Short summary shown on cards and in Google.")
     body = models.TextField(
         help_text=(
@@ -149,6 +163,7 @@ class Insight(OrderedModel):
 
     class Meta:
         ordering = ["order", "-published_on", "id"]
+        constraints = [models.UniqueConstraint(fields=["builder", "slug"], name="content_insight_unique_slug_per_builder")]
 
     def __str__(self):
         return self.title

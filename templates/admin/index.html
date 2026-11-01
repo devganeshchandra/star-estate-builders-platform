@@ -42,13 +42,20 @@
   .wm__edits a:hover { border-color: var(--wm-gold); background: var(--wm-soft); }
   .wm__edits small { display: block; margin-top: 2px; color: var(--wm-muted); font-size: 12px; font-weight: 400; }
   .wm__empty { color: var(--wm-muted); font-size: 14px; }
+  .wm__builders { margin: 0 0 10px !important; }
+  .wm__builders a { color: var(--wm-gold); font-weight: 600; }
   @media (max-width: 760px) { .wm__intro { grid-template-columns: 1fr; } }
 </style>
 
 <div class="wm">
   <div class="wm__intro">
     <div>
-      <h1>Website map</h1>
+      <h1>Website map{% if builder %} · {{ builder.name }}{% endif %}</h1>
+      {% if builders %}
+        <p class="wm__builders">Builder:
+          {% for b in builders %}{% if b == builder %}<strong>{{ b.name }}</strong>{% else %}<a href="?builder={{ b.slug }}">{{ b.name }}</a>{% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}
+        </p>
+      {% endif %}
       <p>Every page of the website and where each part of it is edited. Find the page, then click the part you want to change.</p>
       <ol class="wm__steps">
         <li><b>1</b>Find the page below (or search)</li>

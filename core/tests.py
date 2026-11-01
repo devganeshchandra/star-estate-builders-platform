@@ -13,8 +13,13 @@ from content.models import Insight, Video
 from core.models import HeroBanner, HomePage, InnerPage, Page, SiteSettings
 from leads.models import Enquiry
 from projects.models import BillionaireBlockPage, LandingItem, LandingPage, LandingText, Project
+from tenants.models import Builder, BuilderMembership
 
 MEDIA_ROOT = tempfile.mkdtemp()
+
+
+def m3m():
+    return Builder.objects.get(slug="m3m")
 
 
 @override_settings(MEDIA_ROOT=MEDIA_ROOT)
@@ -49,19 +54,19 @@ class SiteTests(TestCase):
         self.assertContains(response, "Send me my M3M edit")
 
     def test_homepage_text_is_editable(self):
-        page = HomePage.load()
+        page = HomePage.load(m3m())
         page.hero_headline_line_1 = "A brand new"
         page.save()
         self.assertContains(self.client.get("/"), "A brand new")
 
     def test_projects_figures_fall_back_to_live_counts(self):
-        page = HomePage.load()
+        page = HomePage.load(m3m())
         page.projects_facts = ""
         page.save()
         self.assertContains(self.client.get("/"), "<strong data-count-up>9</strong><span>Addresses</span>", html=False)
 
     def test_contact_settings_are_used_everywhere(self):
-        settings = SiteSettings.load()
+        settings = SiteSettings.load(m3m())
         settings.phone_display = "1800 000 0000"
         settings.whatsapp_number = "911234567890"
         settings.save()
@@ -117,10 +122,13 @@ class SiteTests(TestCase):
 
         editor = User.objects.create_user("editor", "e@example.com", "pass", is_staff=True)
         editor.groups.add(Group.objects.get(name="Website editors"))
+        # Staff see only the builders they work for: the editor works on M3M.
+        BuilderMembership.objects.create(user=editor, builder=m3m(), role=BuilderMembership.Role.BUILDER_ADMIN)
         self.client.force_login(editor)
         trump = LandingPage.objects.get(slug="m3m-trump-tower-noida")
         for url in ["/admin/", f"/admin/projects/landingpage/{trump.pk}/change/", "/admin/projects/project/add/",
-                    "/admin/content/insight/add/", "/admin/core/sitesettings/1/change/", "/admin/leads/enquiry/"]:
+                    "/admin/content/insight/add/", f"/admin/core/sitesettings/{SiteSettings.load(m3m()).pk}/change/",
+                    "/admin/leads/enquiry/"]:
             self.assertEqual(self.client.get(url).status_code, 200, url)
         self.assertEqual(self.client.get("/admin/auth/user/").status_code, 403)
 
@@ -153,14 +161,14 @@ class SiteTests(TestCase):
             "/admin/projects/project/",
             "/admin/projects/project/add/",
             f"/admin/projects/project/{Project.objects.first().pk}/change/",
-            "/admin/core/homepage/1/change/",
-            "/admin/projects/billionaireblockpage/1/change/",
+            f"/admin/core/homepage/{HomePage.load(m3m()).pk}/change/",
+            f"/admin/projects/billionaireblockpage/{BillionaireBlockPage.objects.get().pk}/change/",
             "/admin/projects/landingpage/",
             "/admin/projects/landingitem/",
             "/admin/projects/landingitem/add/",
             f"/admin/projects/landingitem/{LandingItem.objects.first().pk}/change/",
             *(f"/admin/projects/landingpage/{page.pk}/change/" for page in LandingPage.objects.all()),
-            "/admin/core/sitesettings/1/change/",
+            f"/admin/core/sitesettings/{SiteSettings.load(m3m()).pk}/change/",
             "/admin/core/herobanner/",
             "/admin/core/page/",
             "/admin/content/pressitem/",
@@ -337,7 +345,7 @@ class SiteTests(TestCase):
         self.assertContains(self.client.get("/projects/m3m-the-line-pentsuites"), 'class="site-header"', html=False)
 
     def test_landing_pages_have_their_own_numbers_and_rera_block(self):
-        site = SiteSettings.load()
+        site = SiteSettings.load(m3m())
         for slug, whatsapp in (("m3m-jacob-co-residences", "917399673996"),
                                ("m3m-the-cullinan-residential", "917399473994"),
                                ("m3m-trump-tower-noida", "917399473994")):
@@ -387,7 +395,7 @@ class SiteTests(TestCase):
         self.assertLess(html.index('id="projects"'), html.index('class="bbt"'))
 
     def test_billionaire_block_is_editable(self):
-        page = BillionaireBlockPage.load()
+        page = BillionaireBlockPage.load(m3m())
         page.tagline = "A new horizon."
         page.save()
         self.assertContains(self.client.get("/billionaire-block"), "A new horizon.")
@@ -480,7 +488,7 @@ class MenuPageTests(TestCase):
         self.assertContains(response, 'class="masonry__item"', count=13)
         self.assertContains(response, "Moneycontrol")
         self.assertNotContains(response, 'id="films"')
-        Video.objects.create(title="Walkthrough", youtube_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        Video.objects.create(builder=m3m(), title="Walkthrough", youtube_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ")
         self.assertContains(self.client.get("/media-centre"), "dQw4w9WgXcQ")
 
     def test_contact_page(self):

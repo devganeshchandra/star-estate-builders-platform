@@ -11,7 +11,7 @@
     </header>
 
     {# One compact card. Every option is a whole chip (the radio inside is never drawn) that turns navy when chosen. #}
-    <form aria-label="Build a personal M3M project shortlist" class="finder" novalidate data-guided-form data-lead-form action="{% url 'submit_enquiry' %}" method="post">
+    <form aria-label="Build a personal {{ builder.name }} project shortlist" class="finder" novalidate data-guided-form data-lead-form action="{% url 'submit_enquiry' %}" method="post">
       {% include "partials/form_tracking.html" with source="guided" %}
 
       <div class="finder__progress" data-guided-progress>
@@ -102,7 +102,7 @@
         <div class="finder__footer">
           <label class="finder-consent">
             <input data-error-id="guided-consent-error" id="guided-consent" name="consent" required type="checkbox" value="on" data-validate="consent" data-validate-on-submit data-consent-message="Please confirm that we may contact you about this request.">
-            <span>M3M India may contact me about this project.</span>
+            <span>{{ site.site_name }} may contact me about this project.</span>
           </label>
           <p class="finder__note">{{ st.guided_note }}</p>
         </div>

@@ -3,9 +3,9 @@
   <div class="page-wrap">
     <div class="site-footer__top">
       <div class="site-footer__brand">
-        <a class="wordmark wordmark--footer" href="/" aria-label="M3M India home">
-          <img alt="" class="wordmark__logo wordmark__logo--color" height="56" width="180" loading="lazy" src="{% static 'images/logo/m3m-logo.png' %}">
-          <span class="visually-hidden">M3M India</span>
+        <a class="wordmark wordmark--footer" href="/" aria-label="{{ site.site_name }} home">
+          {% if site.logo %}<img alt="" class="wordmark__logo wordmark__logo--color" height="56" width="180" loading="lazy" src="{{ site.logo.url }}">
+          <span class="visually-hidden">{{ site.site_name }}</span>{% else %}<span class="wordmark__text">{{ site.site_name }}</span>{% endif %}
         </a>
       </div>
       <div class="site-footer__address">

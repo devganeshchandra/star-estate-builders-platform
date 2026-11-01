@@ -20,10 +20,25 @@
     return String(number).padStart(2, "0");
   }
 
-  /* ---------- Campaign tracking (UTM) for lead forms ---------- */
+  /* ---------- Campaign tracking (UTM and ad click IDs) for lead forms ---------- */
+
+  // Each field and the link parameters that fill it: the first one present wins. Old ad templates used
+  // {keyword} for the search term and Taboola sends tblci (some links spell it tbcli).
+  var TRACKING = {
+    utm_source: ["utm_source"],
+    utm_medium: ["utm_medium"],
+    utm_campaign: ["utm_campaign"],
+    utm_term: ["utm_term", "keyword"],
+    utm_content: ["utm_content"],
+    gclid: ["gclid"],
+    matchtype: ["matchtype"],
+    fbclid: ["fbclid"],
+    tbclid: ["tblci", "tbclid", "tbcli"],
+    device: ["device"],
+    city: ["city"],
+  };
 
   function initTracking() {
-    var keys = ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"];
     var params = new URLSearchParams(window.location.search);
     var stored = {};
     try {
@@ -31,11 +46,14 @@
     } catch (error) {
       stored = {};
     }
-    if (keys.some(function (key) { return params.has(key); })) {
-      stored = {};
-      keys.forEach(function (key) {
-        if (params.get(key)) stored[key] = params.get(key).slice(0, 120);
-      });
+    var found = {};
+    Object.keys(TRACKING).forEach(function (field) {
+      var name = TRACKING[field].filter(function (key) { return params.get(key); })[0];
+      if (name) found[field] = params.get(name).slice(0, 255);
+    });
+    // A visit from a new ad or campaign link replaces what was kept from the previous one.
+    if (Object.keys(found).length) {
+      stored = found;
       try {
         sessionStorage.setItem("m3m-utm", JSON.stringify(stored));
       } catch (error) {

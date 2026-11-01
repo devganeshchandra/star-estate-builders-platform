@@ -1,0 +1,19 @@
+{% comment %}
+  The builder's own icon, colours, fonts and marketing tags (Contact & site settings in the admin). Each part
+  appears only when it is filled in, so a builder without them keeps the design exactly as its stylesheet has it.
+{% endcomment %}
+  {% if site.favicon %}<link rel="icon" type="image/png" href="{{ site.favicon.url }}">
+  <link rel="apple-touch-icon" href="{{ site.favicon.url }}">{% endif %}
+  {% if site.font_heading or site.font_body %}<link rel="stylesheet" href="https://fonts.googleapis.com/css2?{% if site.font_heading %}family={{ site.font_heading|urlencode }}:wght@400;500;700&amp;{% endif %}{% if site.font_body %}family={{ site.font_body|urlencode }}:wght@400;500;600;700&amp;{% endif %}display=swap">{% endif %}
+  {% if site.primary_color or site.secondary_color or site.font_heading or site.font_body %}<style>
+    :root {
+      {% if site.primary_color %}--ink: {{ site.primary_color }};{% endif %}
+      {% if site.secondary_color %}--champagne: {{ site.secondary_color }}; --rose-gold: {{ site.secondary_color }};{% endif %}
+      {% if site.font_heading %}--font-display: "{{ site.font_heading }}", Arial, sans-serif;{% endif %}
+      {% if site.font_body %}--font-body: "{{ site.font_body }}", Arial, sans-serif;{% endif %}
+    }
+  </style>{% endif %}
+  {% if site.gtm_id %}<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','{{ site.gtm_id|escapejs }}');</script>{% endif %}
+  {% if site.ga4_id %}<script async src="https://www.googletagmanager.com/gtag/js?id={{ site.ga4_id|urlencode }}"></script>
+  <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','{{ site.ga4_id|escapejs }}');</script>{% endif %}
+  {% if site.meta_pixel_id %}<script>!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');fbq('init','{{ site.meta_pixel_id|escapejs }}');fbq('track','PageView');</script>{% endif %}

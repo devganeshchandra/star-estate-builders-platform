@@ -6,7 +6,6 @@ from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
 from unfold.admin import ModelAdmin, StackedInline, TabularInline
 
-from core import site_map
 from core.admin import SingletonAdmin
 from projects import landing
 from projects.models import (
@@ -21,6 +20,15 @@ from projects.models import (
     ProjectHighlight,
     ProjectImage,
 )
+from tenants.admin_scoping import TenantScopedAdmin
+
+
+def _change_url(obj):
+    return reverse(f"admin:{obj._meta.app_label}_{obj._meta.model_name}_change", args=[obj.pk]) if obj else ""
+
+
+def _main_page(project):
+    return project.landing_pages.filter(is_default=True).first() if project and project.pk else None
 
 
 class ProjectHighlightInline(TabularInline):
@@ -42,11 +50,12 @@ class ProjectImageInline(StackedInline):
 
 
 @admin.register(Project)
-class ProjectAdmin(ModelAdmin):
+class ProjectAdmin(TenantScopedAdmin, ModelAdmin):
     list_display = ["thumbnail", "name", "status", "is_featured", "location", "order", "is_published", "enquiry_count"]
     list_display_links = ["thumbnail", "name"]
     list_editable = ["status", "is_featured", "order", "is_published"]
     list_filter = ["status", "is_published", "is_featured", "category", "is_residential", "is_commercial"]
+    list_select_related = ["builder"]
     search_fields = ["name", "category", "location", "rera"]
     prepopulated_fields = {"slug": ["name"]}
     inlines = [ProjectHighlightInline, ProjectConfigurationInline, ProjectImageInline]
@@ -56,6 +65,7 @@ class ProjectAdmin(ModelAdmin):
             "Project card",
             {
                 "fields": [
+                    "builder",
                     ("name", "slug"),
                     "category",
                     ("is_residential", "is_commercial"),
@@ -80,7 +90,7 @@ class ProjectAdmin(ModelAdmin):
     ]
 
     def get_fieldsets(self, request, obj=None):
-        if obj and obj.slug in landing.PAGES:
+        if _main_page(obj):
             # Its page is an ad landing page: the standard page fields and tabs are not shown on the site.
             return [
                 ("Where this project’s page is edited", {"fields": ["where_to_edit"]}),
@@ -90,7 +100,7 @@ class ProjectAdmin(ModelAdmin):
         return self.fieldsets
 
     def get_inlines(self, request, obj):
-        return [] if obj and obj.slug in landing.PAGES else self.inlines
+        return [] if _main_page(obj) else self.inlines
 
     @admin.display(description="Page content")
     def where_to_edit(self, obj):
@@ -99,7 +109,7 @@ class ProjectAdmin(ModelAdmin):
             "WhatsApp and RERA block, is edited in <a href=\"{}\" style=\"font-weight:700;text-decoration:underline\">"
             "{} → all page content</a>. Here you edit the project card (name, RERA number, picture, stage) that "
             "appears on the Projects page and in enquiries. <a href=\"{}\" target=\"_blank\">View the page ↗</a>",
-            site_map.landing_page_url(obj.slug), obj.name, obj.get_absolute_url(),
+            _change_url(_main_page(obj)), obj.name, obj.get_absolute_url(),
         )
 
     @admin.display(description="")
@@ -173,6 +183,8 @@ class BillionaireBlockPageAdmin(SingletonAdmin):
         ("Search engines & sharing", {"fields": ["seo_title", "seo_description"]}),
     ]
 
+    create_missing = False  # Only builders that have this page.
+
     @admin.display(description="This page")
     def where_to_edit(self, obj):
         return format_html(
@@ -180,7 +192,7 @@ class BillionaireBlockPageAdmin(SingletonAdmin):
             "RERA line in the footer and the homepage band. Every other section (the story, community, amenities, "
             "towers, location, timeline, sources) is in <a href=\"{}\" style=\"font-weight:700;text-decoration:underline\">"
             "Billionaire Block → all other content</a>. <a href=\"/billionaire-block\" target=\"_blank\">View the page ↗</a>",
-            site_map.landing_page_url("billionaire-block"),
+            _change_url(landing.builder_page(obj.builder, landing.BILLIONAIRE)),
         )
 
 
@@ -239,22 +251,57 @@ class LandingItemInline(StackedInline):
 
     def get_formset(self, request, obj=None, **kwargs):
         formset = super().get_formset(request, obj, **kwargs)
-        formset.form.base_fields["list_key"] = _list_field(obj.slug if obj else None)
+        formset.form.base_fields["list_key"] = _list_field(obj.template if obj else None)
         return formset
 
 
+class LandingPageForm(forms.ModelForm):
+    template = forms.ChoiceField(
+        label="Design", choices=[], help_text="The page design. Its starting texts, pictures and lists are added for you to edit."
+    )
+
+    class Meta:
+        model = LandingPage
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["template"].choices = landing.template_choices()
+
+
 @admin.register(LandingPage)
-class LandingPageAdmin(ModelAdmin):
-    list_display = ["name", "address", "related"]
+class LandingPageAdmin(TenantScopedAdmin, ModelAdmin):
+    list_display = ["name", "builder", "project", "address", "is_default", "is_published", "related"]
+    list_filter = ["project", "is_published", "is_default"]
+    list_select_related = ["builder", "project"]
+    search_fields = ["name", "slug", "project__name"]
     inlines = [LandingTextInline, LandingImageInline, LandingItemInline]
-    readonly_fields = ["how_to_edit"]
+    readonly_fields = ["how_to_edit", "design"]
+
+    @admin.display(description="Design")
+    def design(self, obj):
+        module = landing.PAGES.get(obj.template)
+        return module.NAME if module else obj.template or "—"
+
+    def get_form(self, request, obj=None, **kwargs):
+        if obj is None:
+            kwargs["form"] = LandingPageForm
+        return super().get_form(request, obj, **kwargs)
+
+    def get_inlines(self, request, obj):
+        return self.inlines if obj else []
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        if not change:
+            landing.fill_page(obj)
 
     class Media:
         js = ["admin/landing-finder.js"]
 
     @admin.display(description="Address on the website")
     def address(self, obj):
-        if obj.slug == site_map.WEBSITE_TEXTS:
+        if obj.template == landing.WEBSITE_TEXTS:
             return "Every page (header, footer, popup, small headings)"
         url = obj.get_absolute_url()
         return format_html('<a href="{}" target="_blank">{} ↗</a>', url, url)
@@ -264,13 +311,13 @@ class LandingPageAdmin(ModelAdmin):
         return self._related_links(obj) or "—"
 
     def _related_links(self, obj):
-        if obj.slug == "billionaire-block":
+        if obj.template == landing.BILLIONAIRE:
             return format_html('<a href="{}">Billionaire Block: banner, form & RERA</a>',
                                reverse("admin:projects_billionaireblockpage_changelist"))
-        project = site_map.project_url(obj.slug)
-        if project:
+        if obj.project_id:
+            enquiries = reverse("admin:leads_enquiry_changelist") + f"?landing_page__id__exact={obj.pk}"
             return format_html('<a href="{}">Project card (name, RERA no., picture)</a> · <a href="{}">Enquiries</a>',
-                               project, site_map.project_enquiries_url(obj.slug))
+                               _change_url(obj.project), enquiries)
         return ""
 
     @admin.display(description="How to edit this page")
@@ -295,34 +342,31 @@ class LandingPageAdmin(ModelAdmin):
         return format_html("{}{}{}", view, extra, steps)
 
     def get_fieldsets(self, request, obj=None):
+        if obj is None:
+            return [(None, {"fields": ["builder", "project", "name", "slug", "template", "is_default", "is_published"]})]
         fieldsets = [(None, {"fields": ["how_to_edit", "name"]})]
-        if obj and obj.slug not in ("billionaire-block", site_map.WEBSITE_TEXTS):  # Billionaire: on its own page.
-            fieldsets.append(
+        if obj.project_id:  # Billionaire Block and the website texts have no page SEO of their own here.
+            fieldsets += [
+                ("Page", {"fields": ["project", "slug", "design", "is_default", "is_published"]}),
                 (
                     "Search engines & sharing",
                     {"fields": ["seo_title", "seo_description", "share_title", "share_description", "share_image"]},
-                )
+                ),
+            ]
+        fieldsets.append(
+            (
+                "How each list uses its fields",
+                {
+                    "fields": [],
+                    "classes": ["collapse"],
+                    "description": format_html_join("", "<p><strong>{}</strong>: {}</p>", landing.list_help(obj.template)),
+                },
             )
-        if obj:
-            fieldsets.append(
-                (
-                    "How each list uses its fields",
-                    {
-                        "fields": [],
-                        "classes": ["collapse"],
-                        "description": format_html_join(
-                            "", "<p><strong>{}</strong>: {}</p>", landing.list_help(obj.slug)
-                        ),
-                    },
-                )
-            )
+        )
         return fieldsets
 
-    def has_add_permission(self, request):
-        return False  # A landing page needs its own template, so pages are added in code.
-
     def has_delete_permission(self, request, obj=None):
-        return False
+        return False  # Untick “Show on site” instead: leads keep pointing at the page.
 
 
 class LandingItemForm(forms.ModelForm):
@@ -334,7 +378,7 @@ class LandingItemForm(forms.ModelForm):
 
 
 @admin.register(LandingItem)
-class LandingItemAdmin(ModelAdmin):
+class LandingItemAdmin(TenantScopedAdmin, ModelAdmin):
     form = LandingItemForm
     list_display = ["thumbnail", "title", "list_name", "page", "order", "is_published"]
     list_display_links = ["thumbnail", "title"]
@@ -356,4 +400,4 @@ class LandingItemAdmin(ModelAdmin):
 
     @admin.display(description="List", ordering="list_key")
     def list_name(self, obj):
-        return dict(landing.list_choices(obj.page.slug)).get(obj.list_key, obj.list_key)
+        return dict(landing.list_choices(obj.page.template)).get(obj.list_key, obj.list_key)

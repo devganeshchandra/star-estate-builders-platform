@@ -1,10 +1,11 @@
 """
-Load the content of the original Next.js site into the database.
+Load the first builder's (M3M's) starting content: its projects, press, gallery, articles and pages.
 
     python manage.py seed_content            # add anything that is missing
     python manage.py seed_content --update   # also overwrite edited rows
 
-Safe to run more than once: rows are matched by slug / title.
+Safe to run more than once: rows are matched by slug / title within the builder. A new builder does not use this
+command: adding it in the admin (or `manage.py create_builder`) gives it its own empty starting pages.
 """
 
 import datetime
@@ -17,8 +18,12 @@ from django.db import transaction
 
 from content.models import Insight, JourneyPrinciple, JourneyStat, MediaImage, Milestone, PressItem, Publication
 from core import seed_pages
+from core.branding import apply_first_builder_branding
 from core.models import FAQ, HeroBanner, HomePage, InnerPage, Page, SiteSettings
+from projects import landing
 from projects.models import BillionaireBlockPage, BillionaireItem, BillionaireNews, BillionaireResidence, Project
+from tenants.migration_helpers import FIRST_BUILDER_SLUG
+from tenants.models import Builder
 
 SEED_IMAGES = Path(settings.BASE_DIR) / "seed" / "images"
 
@@ -233,16 +238,19 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--update", action="store_true", help="Overwrite rows that already exist.")
+        parser.add_argument("--builder", default=FIRST_BUILDER_SLUG, help="Slug of the builder to load it into.")
 
     @transaction.atomic
-    def handle(self, *args, update=False, **options):
+    def handle(self, *args, update=False, builder=FIRST_BUILDER_SLUG, **options):
         self.update = update
-        # Create the single-row settings directly (load() may return a cached copy).
-        SiteSettings.objects.get_or_create(pk=1)
-        HomePage.objects.get_or_create(pk=1)
+        self.builder = Builder.objects.get(slug=builder)
+        site = SiteSettings.objects.filter(builder=self.builder).first() or SiteSettings.create_for(self.builder)
+        apply_first_builder_branding(site, self.builder.slug)
+        site.save()
+        HomePage.objects.filter(builder=self.builder).first() or HomePage.create_for(self.builder)
 
-        if not HeroBanner.objects.exists():
-            banner = HeroBanner(alt_text="Towers rising above the clouds at sunset", order=0)
+        if not HeroBanner.objects.for_builder(self.builder).exists():
+            banner = HeroBanner(builder=self.builder, alt_text="Towers rising above the clouds at sunset", order=0)
             self._attach(banner, "image", "home_banners/towers-above-clouds.jpg")
             self._attach(banner, "video", "billionaire_block/hero.mp4")
             banner.save()
@@ -266,7 +274,9 @@ class Command(BaseCommand):
             self._upsert(JourneyStat, {"label": label}, {"value": value, "order": order})
         publications = {}
         for name, logo, website in PUBLICATIONS:
-            publication, _ = Publication.objects.get_or_create(name=name, defaults={"website": website})
+            publication, _ = Publication.objects.get_or_create(
+                builder=self.builder, name=name, defaults={"website": website}
+            )
             if not publication.logo or self.update:
                 publication.website = website
                 self._attach(publication, "logo", logo)
@@ -297,18 +307,22 @@ class Command(BaseCommand):
 
         self._seed_billionaire_block()
 
-        disclaimer = SiteSettings.objects.get(pk=1).footer_disclaimer
+        disclaimer = site.footer_disclaimer
         for title, slug in PAGES:
             body = disclaimer if slug == "disclaimer" else f"{title} information for M3M India will be published here."
             Page.objects.get_or_create(
-                slug=slug, defaults={"title": title, "body": body, "is_published": slug == "disclaimer"}
+                builder=self.builder, slug=slug, defaults={"title": title, "body": body, "is_published": slug == "disclaimer"}
             )
+        # The landing pages created by migrations become their projects' main pages.
+        landing.link_projects(self.builder)
 
         if options["verbosity"]:
             self.stdout.write(self.style.SUCCESS("Website content is loaded."))
 
     def _seed_billionaire_block(self):
-        page, _ = BillionaireBlockPage.objects.get_or_create(pk=1)
+        page = BillionaireBlockPage.objects.filter(builder=self.builder).first() or BillionaireBlockPage.create_for(
+            self.builder
+        )
         if not page.rera_number:
             page.rera_number = seed_pages.BILLIONAIRE_RERA
         for field, path in seed_pages.BILLIONAIRE_BLOCK_FILES.items():
@@ -347,6 +361,8 @@ class Command(BaseCommand):
             self._upsert(BillionaireItem, {"section": section, "title": title}, values, image=image or None)
 
     def _upsert(self, model, lookup, values, image=None):
+        if any(field.name == "builder" for field in model._meta.fields):
+            lookup = {"builder": self.builder, **lookup}
         obj = model.objects.filter(**lookup).first()
         created = obj is None
         if created:

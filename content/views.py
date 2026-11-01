@@ -8,10 +8,10 @@ from core.views import inner_page
 
 @require_GET
 def insight_list(request):
-    insights = list(Insight.objects.filter(is_published=True))
+    insights = list(Insight.objects.for_builder(request.builder).filter(is_published=True))
     featured = next((i for i in insights if i.is_featured), insights[0] if insights else None)
     context = {
-        "inner": inner_page(InnerPage.Key.INSIGHTS),
+        "inner": inner_page(request.builder, InnerPage.Key.INSIGHTS),
         "featured": featured,
         "insights": [i for i in insights if i != featured],
         "categories": sorted({i.category for i in insights}),
@@ -21,8 +21,9 @@ def insight_list(request):
 
 @require_GET
 def insight_detail(request, slug):
-    insight = get_object_or_404(Insight, slug=slug, is_published=True)
-    others = Insight.objects.filter(is_published=True).exclude(pk=insight.pk)
+    published = Insight.objects.for_builder(request.builder).filter(is_published=True)
+    insight = get_object_or_404(published, slug=slug)
+    others = published.exclude(pk=insight.pk)
     related = list(others.filter(category=insight.category)[:3])
     if len(related) < 3:
         related += list(others.exclude(pk__in=[i.pk for i in related])[: 3 - len(related)])

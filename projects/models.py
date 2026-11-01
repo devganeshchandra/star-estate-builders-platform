@@ -1,11 +1,14 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.urls import reverse
+from django.utils import timezone
 
 from core.images import ResizingImageField
 from core.models import SingletonModel
+from tenants.query import BuilderUploadTo, TenantQuerySet
 
 
-class ProjectQuerySet(models.QuerySet):
+class ProjectQuerySet(TenantQuerySet):
     def published(self):
         return self.filter(is_published=True)
 
@@ -33,9 +36,11 @@ class Project(models.Model):
         Status.UPCOMING: ("On the Horizon", "Upcoming launches"),
     }
 
+    builder = models.ForeignKey("tenants.Builder", on_delete=models.PROTECT, related_name="projects")
+    tenant_path = "builder"
+
     name = models.CharField(max_length=120)
     slug = models.SlugField(
-        unique=True,
         max_length=120,
         help_text="Used in the page address: /projects/your-project-name. Changing it breaks old links.",
     )
@@ -48,7 +53,7 @@ class Project(models.Model):
     location = models.CharField(max_length=120, help_text="e.g. “Sector 97, Noida Expressway”.")
     city = models.CharField(max_length=60, default="Noida")
     rera = models.CharField("RERA number", max_length=80)
-    image = ResizingImageField(upload_to="projects/", help_text="Main project image (landscape).")
+    image = ResizingImageField(upload_to=BuilderUploadTo("projects"), help_text="Main project image (landscape).")
     summary = models.TextField(help_text="Short description used on the card, page and in Google.")
     status = models.CharField(
         "Collection",
@@ -76,7 +81,7 @@ class Project(models.Model):
     description = models.TextField(
         blank=True, help_text="Optional longer description. Leave a blank line between paragraphs."
     )
-    brochure = models.FileField(upload_to="brochures/", blank=True, help_text="Optional PDF brochure.")
+    brochure = models.FileField(upload_to=BuilderUploadTo("brochures"), blank=True, help_text="Optional PDF brochure.")
     map_embed_url = models.URLField(
         blank=True,
         max_length=1000,
@@ -96,6 +101,8 @@ class Project(models.Model):
 
     class Meta:
         ordering = ["order", "id"]
+        # The same project name and address may exist for several builders (e.g. m3m + jacob, ace + jacob).
+        constraints = [models.UniqueConstraint(fields=["builder", "slug"], name="projects_project_unique_slug_per_builder")]
 
     def __str__(self):
         return self.name
@@ -117,6 +124,10 @@ class Project(models.Model):
 
 
 class ProjectHighlight(models.Model):
+    tenant_path = "project__builder"
+
+    objects = TenantQuerySet.as_manager()
+
     project = models.ForeignKey(Project, related_name="highlights", on_delete=models.CASCADE)
     title = models.CharField(max_length=120)
     text = models.TextField(blank=True)
@@ -132,11 +143,15 @@ class ProjectHighlight(models.Model):
 class ProjectConfiguration(models.Model):
     """A unit type / floor plan row, e.g. “3 BHK · 2,450 sq. ft.”."""
 
+    tenant_path = "project__builder"
+
+    objects = TenantQuerySet.as_manager()
+
     project = models.ForeignKey(Project, related_name="configurations", on_delete=models.CASCADE)
     unit_type = models.CharField(max_length=80)
     size = models.CharField(max_length=80, blank=True)
     price = models.CharField(max_length=80, blank=True, help_text="e.g. “Price on request”.")
-    floor_plan = ResizingImageField(upload_to="floor-plans/", blank=True)
+    floor_plan = ResizingImageField(upload_to=BuilderUploadTo("floor-plans"), blank=True)
     order = models.PositiveIntegerField(default=0)
 
     class Meta:
@@ -149,8 +164,12 @@ class ProjectConfiguration(models.Model):
 
 
 class ProjectImage(models.Model):
+    tenant_path = "project__builder"
+
+    objects = TenantQuerySet.as_manager()
+
     project = models.ForeignKey(Project, related_name="gallery", on_delete=models.CASCADE)
-    image = ResizingImageField(upload_to="projects/gallery/")
+    image = ResizingImageField(upload_to=BuilderUploadTo("projects/gallery"))
     caption = models.CharField(max_length=160, blank=True)
     order = models.PositiveIntegerField(default=0)
 
@@ -171,10 +190,10 @@ class BillionaireBlockPage(SingletonModel):
 
     # Hero
     hero_video = models.FileField(
-        upload_to="billionaire-block/", blank=True, help_text="Silent MP4 loop, 10–20 seconds. Leave empty to show the image."
+        upload_to=BuilderUploadTo("billionaire-block"), blank=True, help_text="Silent MP4 loop, 10–20 seconds. Leave empty to show the image."
     )
     hero_image = ResizingImageField(
-        upload_to="billionaire-block/", blank=True, help_text="Shown while the video loads, and on its own without a video."
+        upload_to=BuilderUploadTo("billionaire-block"), blank=True, help_text="Shown while the video loads, and on its own without a video."
     )
     hero_image_alt = models.CharField(max_length=160, default="Billionaire Block towers above the clouds, artistic impression")
     eyebrow = models.CharField(max_length=80, default="Sector 111 · Dwarka Expressway · Gurugram")
@@ -202,9 +221,9 @@ class BillionaireBlockPage(SingletonModel):
         ),
         help_text="Leave a blank line between paragraphs.",
     )
-    about_image = ResizingImageField(upload_to="billionaire-block/", blank=True)
+    about_image = ResizingImageField(upload_to=BuilderUploadTo("billionaire-block"), blank=True)
     about_image_2 = ResizingImageField(
-        upload_to="billionaire-block/", blank=True, help_text="Optional. Stacked under the first image."
+        upload_to=BuilderUploadTo("billionaire-block"), blank=True, help_text="Optional. Stacked under the first image."
     )
     about_facts = models.TextField(
         blank=True,
@@ -224,9 +243,9 @@ class BillionaireBlockPage(SingletonModel):
         ),
         help_text="Leave a blank line between paragraphs.",
     )
-    building_image = ResizingImageField(upload_to="billionaire-block/", blank=True)
+    building_image = ResizingImageField(upload_to=BuilderUploadTo("billionaire-block"), blank=True)
     building_image_2 = ResizingImageField(
-        upload_to="billionaire-block/", blank=True, help_text="Optional. Stacked under the first image."
+        upload_to=BuilderUploadTo("billionaire-block"), blank=True, help_text="Optional. Stacked under the first image."
     )
     building_points = models.TextField(
         blank=True,
@@ -267,7 +286,7 @@ class BillionaireBlockPage(SingletonModel):
         ),
         help_text="Leave a blank line between paragraphs.",
     )
-    architecture_image = ResizingImageField(upload_to="billionaire-block/", blank=True)
+    architecture_image = ResizingImageField(upload_to=BuilderUploadTo("billionaire-block"), blank=True)
     credit_1_label = models.CharField(max_length=40, blank=True, default="Design house")
     credit_1_value = models.CharField(max_length=120, blank=True, default="ELIE SAAB")
     credit_2_label = models.CharField(max_length=40, blank=True, default="Interiors")
@@ -306,7 +325,7 @@ class BillionaireBlockPage(SingletonModel):
     security_text = models.TextField(
         default="Smart City Delhi Airport: M3M’s mixed-use township around the enclave.",
     )
-    security_image = ResizingImageField(upload_to="billionaire-block/", blank=True)
+    security_image = ResizingImageField(upload_to=BuilderUploadTo("billionaire-block"), blank=True)
     location_label = models.CharField(max_length=80, default="Location")
     location_heading = models.CharField(max_length=160, default="Sector 111, Dwarka Expressway.")
     location_text = models.TextField(
@@ -325,7 +344,7 @@ class BillionaireBlockPage(SingletonModel):
     specs_intro = models.TextField(
         default="Check each against the project’s RERA disclosures and your agreement. Not legal advice."
     )
-    specs_image = ResizingImageField(upload_to="billionaire-block/", blank=True)
+    specs_image = ResizingImageField(upload_to=BuilderUploadTo("billionaire-block"), blank=True)
 
     # Developer legacy (figures come from “Journey statistics”, projects from “Delivered Landmarks”)
     legacy_label = models.CharField(max_length=80, default="The developer")
@@ -358,7 +377,7 @@ class BillionaireBlockPage(SingletonModel):
     )
 
     # Brochure
-    brochure = models.FileField(upload_to="billionaire-block/", blank=True, help_text="PDF. Visitors share their name and phone first.")
+    brochure = models.FileField(upload_to=BuilderUploadTo("billionaire-block"), blank=True, help_text="PDF. Visitors share their name and phone first.")
     brochure_heading = models.CharField(max_length=120, default="The private brochure")
     brochure_text = models.CharField(
         max_length=200, default="Share your name and number and the brochure is yours."
@@ -427,16 +446,20 @@ class BillionaireBlockPage(SingletonModel):
 class BillionaireResidence(models.Model):
     """A residence type, e.g. Sky Villas, with its floor plan."""
 
+    tenant_path = "page__builder"
+
+    objects = TenantQuerySet.as_manager()
+
     page = models.ForeignKey(BillionaireBlockPage, related_name="residences", on_delete=models.CASCADE)
     name = models.CharField(max_length=80)
     tagline = models.CharField(max_length=160, blank=True)
-    image = ResizingImageField(upload_to="billionaire-block/")
+    image = ResizingImageField(upload_to=BuilderUploadTo("billionaire-block"))
     image_alt = models.CharField(max_length=160, blank=True)
     size = models.CharField(max_length=80, help_text="e.g. “10,000 – 12,500 sq ft”.")
     configuration = models.CharField(max_length=120, help_text="e.g. “4 & 5 bedrooms with staff quarters”.")
     features = models.TextField(blank=True, help_text="One feature per line.")
     floor_plan = ResizingImageField(
-        upload_to="billionaire-block/floor-plans/", blank=True, help_text="Leave empty to offer the plan on request."
+        upload_to=BuilderUploadTo("billionaire-block/floor-plans"), blank=True, help_text="Leave empty to offer the plan on request."
     )
     order = models.PositiveIntegerField(default=0)
     is_published = models.BooleanField("Show on site", default=True)
@@ -455,6 +478,11 @@ class BillionaireResidence(models.Model):
 
 class BillionaireItem(models.Model):
     """One entry in a list on the Billionaire Block page; `section` decides where it appears."""
+
+    builder = models.ForeignKey("tenants.Builder", on_delete=models.PROTECT, related_name="+")
+    tenant_path = "builder"
+
+    objects = TenantQuerySet.as_manager()
 
     class Section(models.TextChoices):
         STAT = "stat", "Key numbers"
@@ -475,7 +503,7 @@ class BillionaireItem(models.Model):
         max_length=60, blank=True, help_text="Key numbers: the figure, e.g. “12,000+”. Distances: the time, e.g. “15 min”."
     )
     text = models.TextField(blank=True, help_text="Short description. Key numbers: the unit, e.g. “sq ft”.")
-    image = ResizingImageField(upload_to="billionaire-block/", blank=True)
+    image = ResizingImageField(upload_to=BuilderUploadTo("billionaire-block"), blank=True)
     image_alt = models.CharField(max_length=160, blank=True)
     order = models.PositiveIntegerField(default=0)
     is_published = models.BooleanField("Show on site", default=True)
@@ -490,6 +518,10 @@ class BillionaireItem(models.Model):
 
 class BillionaireNews(models.Model):
     """A published story about the project, shown as a card that opens in a popup."""
+
+    tenant_path = "page__builder"
+
+    objects = TenantQuerySet.as_manager()
 
     page = models.ForeignKey(BillionaireBlockPage, related_name="news", on_delete=models.CASCADE)
     tag = models.CharField(max_length=40, blank=True, help_text="One word, e.g. “Launch” or “Pricing”.")
@@ -526,31 +558,106 @@ class LandingPage(models.Model):
     content team can change them in the admin. Rows are created by projects/landing.py.
     """
 
-    slug = models.SlugField(unique=True, max_length=120, editable=False)
+    builder = models.ForeignKey("tenants.Builder", on_delete=models.PROTECT, related_name="landing_pages")
+    project = models.ForeignKey(
+        Project,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="landing_pages",
+        help_text="The project this page advertises. Empty for builder-wide pages (e.g. the shared website texts).",
+    )
+    tenant_path = "builder"
+
+    objects = TenantQuerySet.as_manager()
+
+    slug = models.SlugField(
+        max_length=120,
+        help_text="Page address: /projects/<project>/<this>. For the project's main page, use the project's own slug.",
+    )
     name = models.CharField(max_length=120)
+    template = models.CharField(
+        max_length=80,
+        blank=True,
+        help_text="The page design. Its texts, pictures and lists are created from the design's starting content.",
+    )
+    is_default = models.BooleanField(
+        "Project's main page",
+        default=False,
+        help_text="Shown at /projects/<project>. Other landing pages of the project are at /projects/<project>/<page>.",
+    )
+    is_published = models.BooleanField("Show on site", default=True)
+    created_at = models.DateTimeField(default=timezone.now, editable=False)
+    updated_at = models.DateTimeField(auto_now=True)
     seo_title = models.CharField("Browser & Google title", max_length=160, blank=True)
     seo_description = models.CharField("Google description", max_length=300, blank=True)
     share_title = models.CharField(max_length=160, blank=True, help_text="Title when the link is shared, e.g. on WhatsApp.")
     share_description = models.CharField(max_length=300, blank=True)
-    share_image = ResizingImageField(upload_to="landing/", blank=True, help_text="Picture when the link is shared.")
+    share_image = ResizingImageField(upload_to=BuilderUploadTo("landing"), blank=True, help_text="Picture when the link is shared.")
 
     class Meta:
         ordering = ["name"]
         verbose_name = "Landing page"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["project", "slug"],
+                condition=models.Q(project__isnull=False),
+                name="projects_landingpage_unique_slug_per_project",
+            ),
+            models.UniqueConstraint(
+                fields=["builder", "slug"],
+                condition=models.Q(project__isnull=True),
+                name="projects_landingpage_unique_slug_per_builder",
+            ),
+            models.UniqueConstraint(
+                fields=["project"], condition=models.Q(is_default=True), name="projects_landingpage_one_main_page"
+            ),
+        ]
 
     def __str__(self):
         return self.name
 
     def get_absolute_url(self):
-        if self.slug == "billionaire-block":
+        from projects import landing
+
+        if self.template == landing.BILLIONAIRE:
             return reverse("projects:billionaire_block")
-        if self.slug == "website-texts":  # Shared texts: shown across the site, starting with the homepage.
+        if self.project_id is None:  # Shared website texts: shown across the site, starting with the homepage.
             return "/"
-        return reverse("projects:detail", args=[self.slug])
+        if self.is_default:
+            return reverse("projects:detail", args=[self.project.slug])
+        return reverse("projects:landing", args=[self.project.slug, self.slug])
+
+    def clean(self):
+        from projects import landing
+
+        if self.project_id and not self.builder_id:
+            self.builder = self.project.builder
+        errors = {}
+        if self.project_id and self.project.builder_id != self.builder_id:
+            errors["project"] = "Choose a project of the same builder."
+        if self.project_id and self.template not in landing.PROJECT_TEMPLATES:
+            errors["template"] = "Choose a design for this project page."
+        if self.is_default and not self.project_id:
+            errors["is_default"] = "Only a page with a project can be the project's main page."
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        if self.project_id:
+            if not self.builder_id:
+                self.builder_id = self.project.builder_id
+            elif self.project.builder_id != self.builder_id:
+                raise ValueError("A landing page and its project must belong to the same builder.")
+        super().save(*args, **kwargs)
 
 
 class LandingText(models.Model):
     """One heading, paragraph, button label or note on a landing page."""
+
+    tenant_path = "page__builder"
+
+    objects = TenantQuerySet.as_manager()
 
     page = models.ForeignKey(LandingPage, related_name="texts", on_delete=models.CASCADE)
     section = models.CharField(max_length=80)
@@ -575,11 +682,15 @@ class LandingText(models.Model):
 class LandingImage(models.Model):
     """One fixed picture on a landing page, e.g. a section background."""
 
+    tenant_path = "page__builder"
+
+    objects = TenantQuerySet.as_manager()
+
     page = models.ForeignKey(LandingPage, related_name="images", on_delete=models.CASCADE)
     section = models.CharField(max_length=80)
     key = models.SlugField(max_length=60)
     label = models.CharField(max_length=160)
-    image = ResizingImageField(upload_to="landing/", blank=True, help_text="Landscape, at least 1600px wide.")
+    image = ResizingImageField(upload_to=BuilderUploadTo("landing"), blank=True, help_text="Landscape, at least 1600px wide.")
     alt = models.CharField("Description", max_length=240, blank=True, help_text="For screen readers and Google.")
     order = models.PositiveIntegerField(default=0)
 
@@ -595,6 +706,10 @@ class LandingImage(models.Model):
 class LandingItem(models.Model):
     """One entry in a list on a landing page (a slide, an amenity, a question…); `list_key` decides which."""
 
+    tenant_path = "page__builder"
+
+    objects = TenantQuerySet.as_manager()
+
     page = models.ForeignKey(LandingPage, related_name="items", on_delete=models.CASCADE)
     list_key = models.CharField("List", max_length=40)
     title = models.CharField(max_length=200)
@@ -603,7 +718,7 @@ class LandingItem(models.Model):
     group = models.CharField(max_length=80, blank=True)
     text = models.TextField(blank=True)
     link = models.CharField(max_length=500, blank=True)
-    image = ResizingImageField(upload_to="landing/", blank=True)
+    image = ResizingImageField(upload_to=BuilderUploadTo("landing"), blank=True)
     image_alt = models.CharField("Image description", max_length=240, blank=True)
     order = models.PositiveIntegerField(default=0, help_text="Lower numbers appear first.")
     is_published = models.BooleanField("Show on site", default=True)

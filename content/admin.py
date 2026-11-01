@@ -2,6 +2,8 @@ from django.contrib import admin
 from django.utils.html import format_html
 from unfold.admin import ModelAdmin
 
+from tenants.admin_scoping import TenantScopedAdmin
+
 from content.models import Insight, JourneyPrinciple, JourneyStat, MediaImage, Milestone, PressItem, Publication, Video
 
 
@@ -14,7 +16,7 @@ def image_preview(obj):
 image_preview.short_description = ""
 
 
-class OrderedAdmin(ModelAdmin):
+class OrderedAdmin(TenantScopedAdmin, ModelAdmin):
     list_editable = ["order", "is_published"]
 
 
@@ -35,7 +37,7 @@ class MilestoneAdmin(OrderedAdmin):
 
 
 @admin.register(Publication)
-class PublicationAdmin(ModelAdmin):
+class PublicationAdmin(TenantScopedAdmin, ModelAdmin):
     list_display = ["logo_preview", "name", "website", "item_count"]
     list_display_links = ["logo_preview", "name"]
     search_fields = ["name"]

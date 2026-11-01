@@ -2,14 +2,24 @@ from django import forms
 
 from leads import validation
 from leads.models import Enquiry
-from projects.models import Project
+from projects.models import LandingPage, Project
 
 CONSENT_ERROR = "Please confirm that we may contact you about this enquiry."
 GUIDED_CONSENT_ERROR = "Please confirm that we may contact you about this request."
 
 
 class EnquiryForm(forms.Form):
-    """Handles all three website forms; `source` decides which fields are required."""
+    """Handles every website form; `source` decides which fields are required.
+
+    The builder comes from the website the form was sent on (request.builder), never from the form itself, and
+    the project and landing page are looked up within that builder only: a form cannot file a lead against
+    another builder's project, whatever it posts.
+    """
+
+    def __init__(self, *args, builder, domain=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.builder = builder
+        self.domain = domain
 
     source = forms.ChoiceField(choices=Enquiry.Source.choices)
     name = forms.CharField(max_length=80, required=False)
@@ -19,6 +29,8 @@ class EnquiryForm(forms.Form):
     interest = forms.CharField(max_length=20, required=False)
     residency = forms.CharField(max_length=20, required=False)
     project = forms.SlugField(max_length=120, required=False)
+    # The landing page the form is on (its id), when it is on one.
+    landing = forms.IntegerField(min_value=1, required=False)
     consent = forms.BooleanField(required=False)
     message = forms.CharField(max_length=2000, required=False)
     # Billionaire Block private viewing: folded into the message for the sales team.
@@ -32,11 +44,22 @@ class EnquiryForm(forms.Form):
     # Honeypot: real visitors never see or fill this field.
     website = forms.CharField(required=False)
 
-    utm_source = forms.CharField(max_length=120, required=False)
-    utm_medium = forms.CharField(max_length=120, required=False)
-    utm_campaign = forms.CharField(max_length=120, required=False)
-    utm_term = forms.CharField(max_length=120, required=False)
-    utm_content = forms.CharField(max_length=120, required=False)
+    # Campaign and ad click details. No length limit here: an over-long value is trimmed to fit its column
+    # (TRACKING) rather than losing the lead. The old site's names are accepted too (TRACKING_ALIASES).
+    utm_source = forms.CharField(required=False)
+    utm_medium = forms.CharField(required=False)
+    utm_campaign = forms.CharField(required=False)
+    utm_term = forms.CharField(required=False)
+    utm_content = forms.CharField(required=False)
+    gclid = forms.CharField(required=False)
+    matchtype = forms.CharField(required=False)
+    fbclid = forms.CharField(required=False)
+    tbclid = forms.CharField(required=False)
+    device = forms.CharField(required=False)
+    city = forms.CharField(required=False)
+    keyword = forms.CharField(required=False)
+    tblci = forms.CharField(required=False)
+    tbcli = forms.CharField(required=False)
 
     def clean(self):
         data = super().clean()
@@ -70,7 +93,7 @@ class EnquiryForm(forms.Form):
             if data.get("residency") not in Enquiry.Residency.values:
                 errors["residency"] = "Choose the option that best describes you."
             if not data.get("project"):
-                errors["project"] = "Choose a project for your personal M3M edit."
+                errors["project"] = f"Choose a project for your personal {self.builder.name} edit."
 
         phone = validation.parse_phone(data.get("phone"))
         if not phone:
@@ -95,15 +118,24 @@ class EnquiryForm(forms.Form):
 
         project = None
         if data.get("project"):
-            project = Project.objects.published().filter(slug=data["project"]).first()
+            project = Project.objects.for_builder(self.builder).published().filter(slug=data["project"]).first()
             if project is None:
-                errors["project"] = "Choose a project for your personal M3M edit."
+                errors["project"] = f"Choose a project for your personal {self.builder.name} edit."
+
+        page = None
+        if data.get("landing"):
+            page = LandingPage.objects.for_builder(self.builder).filter(pk=data["landing"], is_published=True).first()
+            if page is None or (project is not None and page.project_id not in (None, project.pk)):
+                errors["landing"] = "This page is no longer available. Please reload it and try again."
+        elif source == Enquiry.Source.LANDING and project is not None:
+            page = project.landing_pages.filter(is_default=True).first()
 
         for field, message in errors.items():
             self.add_error(field, message)
 
         data["phone"] = phone
         data["project_obj"] = project
+        data["landing_obj"] = page
         return data
 
     def full_message(self):
@@ -132,6 +164,10 @@ class EnquiryForm(forms.Form):
     def save(self, request):
         data = self.cleaned_data
         return Enquiry.objects.create(
+            builder=self.builder,
+            source_domain=self.domain.domain if self.domain else "",
+            landing_page=data["landing_obj"],
+            lead_for=Enquiry.lead_for_of(data["source"], data["project_obj"]),
             source=data["source"],
             project=data["project_obj"],
             name=validation.normalize_name(data.get("name")),
@@ -143,14 +179,44 @@ class EnquiryForm(forms.Form):
             consent=True,
             message=self.full_message(),
             page_url=(data.get("page_url") or request.headers.get("referer", ""))[:1000],
-            utm_source=data.get("utm_source", ""),
-            utm_medium=data.get("utm_medium", ""),
-            utm_campaign=data.get("utm_campaign", ""),
-            utm_term=data.get("utm_term", ""),
-            utm_content=data.get("utm_content", ""),
             ip_address=client_ip(request),
             user_agent=request.headers.get("user-agent", "")[:500],
+            **self.tracking(request),
         )
+
+    def tracking(self, request):
+        """The campaign and ad click fields, trimmed to their columns, with the old names accepted and the
+        device worked out from the browser when the ad link does not give it."""
+        data = self.cleaned_data
+        values = {field: (data.get(field) or "").strip() for field in TRACKING}
+        for field, aliases in TRACKING_ALIASES.items():
+            values[field] = values[field] or next((data[a].strip() for a in aliases if data.get(a)), "")
+        values["device"] = DEVICES.get(values["device"].lower(), values["device"]) or device_from(
+            request.headers.get("user-agent", "")
+        )
+        return {field: value[: TRACKING[field]] for field, value in values.items()}
+
+
+# Tracking fields and their column lengths (leads/models.py).
+TRACKING = {
+    "utm_source": 120, "utm_medium": 120, "utm_campaign": 120, "utm_term": 120, "utm_content": 120,
+    "gclid": 255, "matchtype": 20, "fbclid": 255, "tbclid": 255, "device": 20, "city": 100,
+}
+# Names the old website and ad templates used: {keyword} for the search term, Taboola's tblci (or tbcli).
+TRACKING_ALIASES = {"utm_term": ["keyword"], "tbclid": ["tblci", "tbcli"]}
+# Google Ads {device}: m, t or c.
+DEVICES = {"m": "mobile", "t": "tablet", "c": "desktop", "computer": "desktop"}
+
+
+def device_from(user_agent):
+    agent = user_agent.lower()
+    if not agent:
+        return ""
+    if "ipad" in agent or "tablet" in agent or ("android" in agent and "mobile" not in agent):
+        return "tablet"
+    if "mobi" in agent or "iphone" in agent or "android" in agent:
+        return "mobile"
+    return "desktop"
 
 
 def client_ip(request):

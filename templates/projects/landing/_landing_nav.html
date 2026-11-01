@@ -13,7 +13,7 @@
       <img class="lnav__logo" src="{{ imgs.brand_logo.image.url }}" alt="{{ imgs.brand_logo.alt|default:t.brand }}">
       <span class="lnav__logo-shine" style="--logo: url('{{ imgs.brand_logo.image.url }}')" aria-hidden="true"></span>
     {% else %}
-      <small>M3M</small>
+      <small>{{ builder.name }}</small>
       <span>{{ t.brand }}</span>
     {% endif %}
   </a>

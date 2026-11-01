@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
-# Put the site online on an Ubuntu/Debian server: Gunicorn as a systemd
-# service behind Nginx, with optional free HTTPS from Let's Encrypt.
+# Put the builders' websites online on an Ubuntu/Debian server: Gunicorn as a
+# systemd service behind Nginx, with optional free HTTPS from Let's Encrypt.
+# One app serves every builder; list every builder domain (www. is added):
 #
-#   sudo ./scripts/install_server.sh www.m3mindia.com
+#   sudo ./scripts/install_server.sh m3mhome.in acehome.in xyzhome.in
 #
-# Run ./scripts/setup.sh --production --domain <domain> first.
+# Run it again with the full list whenever a builder or domain is added. Each
+# domain must also be in DJANGO_ALLOWED_HOSTS and in the admin (Domains), and is
+# served once ticked "verified". Run ./scripts/setup.sh --production first.
 set -euo pipefail
 
-DOMAIN="${1:?Usage: sudo ./scripts/install_server.sh www.m3mindia.com}"
+DOMAIN="${1:?Usage: sudo ./scripts/install_server.sh m3mhome.in [acehome.in …]}"
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 SERVICE="m3m"
@@ -23,8 +26,12 @@ if [[ ! -x "$ROOT/.venv/bin/gunicorn" ]]; then
   exit 1
 fi
 
-bare="${DOMAIN#www.}"
-if [[ "$bare" == "$DOMAIN" ]]; then SERVER_NAMES="$DOMAIN"; else SERVER_NAMES="$bare $DOMAIN"; fi
+SERVER_NAMES=""
+for name in "$@"; do
+  bare="${name#www.}"
+  SERVER_NAMES="$SERVER_NAMES $bare www.$bare"
+done
+SERVER_NAMES="${SERVER_NAMES# }"
 
 echo "==> Installing Nginx"
 apt-get update
@@ -55,6 +62,20 @@ systemctl restart "$SERVICE"
 
 echo "==> Configuring Nginx for $SERVER_NAMES"
 cat > "/etc/nginx/sites-available/$SERVICE" <<EOF
+# Requests for any other host name are dropped before they reach the app.
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 444;
+}
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    ssl_reject_handshake on;
+}
+
 server {
     listen 80;
     server_name $SERVER_NAMES;
@@ -95,7 +116,8 @@ set_ssl_redirect() {
 if [[ "$answer" =~ ^[Yy]$ ]]; then
   apt-get install -y certbot python3-certbot-nginx
   # shellcheck disable=SC2086
-  certbot --nginx --redirect $(printf -- '-d %s ' $SERVER_NAMES)
+  # One certificate per run covering every domain; --expand adds new builders' domains to it.
+  certbot --nginx --redirect --expand $(printf -- '-d %s ' $SERVER_NAMES)
   set_ssl_redirect 1
 else
   # Without a certificate, redirecting to https:// would make the site unreachable.

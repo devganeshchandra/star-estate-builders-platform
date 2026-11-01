@@ -1,4 +1,4 @@
-# M3M India website: technology overview
+# Builder websites platform: technology overview
 
 One repository, one language on the server (Python), no build step.
 
@@ -10,9 +10,9 @@ Nginx (web server: HTTPS, large uploads)            ← only on the Linux server
    ▼
 Gunicorn (runs the Python app, 3 workers)           ← only on the Linux server
    ▼
-Django 6.1 (Python): pages, admin panel, enquiry API
+Django 6.1 (Python): domain → builder, pages, admin panel, enquiry API
    ▼
-Database: PostgreSQL                               + media/ folder for uploads
+Database: PostgreSQL (shared by every builder)    + media/ folder for uploads
 ```
 
 ## Frontend (what runs in the visitor's browser)
@@ -50,6 +50,7 @@ No longer used: Node.js, Next.js, React, Framer Motion and the Tailwind build.
 
 | App | Responsible for |
 | --- | --- |
+| `tenants` | Builders, domains, staff memberships and roles; the domain → builder middleware; access rules; new-builder provisioning; `create_builder`, `add_local_domains`, `check_tenant_integrity` |
 | `core` | Site settings (phone, WhatsApp, address, footer), homepage text, hero banners, pages (privacy…), image helpers, sitemap, robots.txt, 404 page, `seed_content` command |
 | `projects` | Projects and their landing pages: highlights, configurations/floor plans, gallery, brochure, map, SEO fields |
 | `content` | Journey values and statistics, press/news items, media gallery, insights |
@@ -61,7 +62,8 @@ No longer used: Node.js, Next.js, React, Framer Motion and the Tailwind build.
 | --- | --- |
 | `/` | Homepage (teasers: 3 projects, 8 gallery images, 3 news items, 3 insights) |
 | `/projects` | All projects in three collections: Now Presenting, On the Horizon, Delivered Landmarks |
-| `/projects/<slug>` | Project landing page, e.g. `/projects/m3m-trump-tower-noida` |
+| `/projects/<slug>` | The project's main landing page, e.g. `/projects/m3m-trump-tower-noida` |
+| `/projects/<slug>/<page>` | A further landing page of the project (e.g. one per campaign) |
 | `/our-journey` | Story, philosophy, values, milestones timeline, signature projects |
 | `/media-centre` | Filterable gallery with lightbox, films (YouTube), press coverage |
 | `/insights` | Featured article and all articles, filterable by topic |
@@ -69,16 +71,17 @@ No longer used: Node.js, Next.js, React, Framer Motion and the Tailwind build.
 | `/contact` | Call back form, contact details, map, FAQs |
 | `/privacy`, `/disclaimer`, `/compliance` | Text pages managed in the admin |
 | `/admin/` | Admin panel |
-| `/api/enquiries` | Receives the enquiry forms (POST only) |
+| `/api/enquiries` | Receives the enquiry forms (POST only); the builder comes from the host name |
+| `/healthz` | Health check for monitoring (no builder needed) |
 | `/sitemap.xml`, `/robots.txt` | For search engines |
 | `/styleguide` | Design reference (hidden from Google) |
 
 ## Database
 
-- **PostgreSQL** (version 14 or newer; 18 in development). Connection settings are the `DB_*` lines in
-  `.env`; `setup.sh` installs and configures it on Ubuntu/Debian. Full guide, including the leads table,
-  backups and direct access: [DATABASE.md](DATABASE.md).
-- SQLite (`db.sqlite3`) is only a fallback for a laptop without PostgreSQL (`DB_ENGINE=sqlite`).
+- **PostgreSQL** (18 locally): one database shared by every builder, each row owned by a builder
+  ([MULTI_TENANT_ARCHITECTURE.md](MULTI_TENANT_ARCHITECTURE.md)). Guide: [DATABASE.md](DATABASE.md); the move
+  from SQLite: [DATABASE_MIGRATION.md](DATABASE_MIGRATION.md).
+- **SQLite**: the original `db.sqlite3` is kept unchanged, for a rollback with the previous code.
 - **Uploaded files** (images, brochures, floor plans) are not in the
   database. They are in the `media/` folder. Back up both.
 
@@ -98,7 +101,8 @@ No longer used: Node.js, Next.js, React, Framer Motion and the Tailwind build.
 | `JourneyPrinciple`, `JourneyStat`, `Milestone` | "Our Journey" values, numbers and timeline |
 | `PressItem`, `MediaImage`, `Video` | Press coverage, gallery (with categories), YouTube films |
 | `Insight` | Articles: category, summary, body with sub-headings, author, date |
-| `Enquiry` | Every lead: form, project, name, phone (international format), email, call time, interest, residency, consent, page, UTM campaign tags, IP, browser, status, assigned salesperson, notes, date |
+| `Builder`, `Domain`, `BuilderMembership` | The builders (tenants), their domains, and who works on which builder in which role |
+| `Enquiry` | Every lead: builder, source domain, landing page, form, project, name, phone (international format), email, call time, interest, residency, consent, page, UTM campaign tags, IP, browser, status, assigned salesperson, notes, date |
 | Django built-ins | Admin users, groups and permissions, login sessions, change history |
 
 ## Security built in

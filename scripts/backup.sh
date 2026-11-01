@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Save all website content (database + uploaded images/files) into one file,
-# plus a native PostgreSQL dump (database.dump) when the site runs on PostgreSQL,
-# e.g. to move the site to another machine or keep a nightly copy.
+# plus a ready-to-use copy of the database itself: db.sqlite3 on SQLite, or a
+# native dump (database.dump) on PostgreSQL. Safe to run while the site is live,
+# e.g. nightly or to move the site to another machine.
 #
 #   ./scripts/backup.sh                  -> backups/m3m-backup-YYYY-MM-DD_HHMM.tar.gz
 #
@@ -26,9 +27,21 @@ mkdir -p media
 cp -r media "$work/media"
 files=(data.json media)
 
-# On PostgreSQL, also keep a native dump (pg_restore can load it into any PostgreSQL server).
 set -a; [[ -f .env ]] && source .env; set +a
-if [[ "${DB_ENGINE:-sqlite}" =~ ^postgres ]] && command -v pg_dump >/dev/null; then
+if [[ ! "${DB_ENGINE:-postgres}" =~ ^postgres ]]; then
+  # SQLite's own backup: a consistent copy even while visitors are sending leads (copying the file is not safe).
+  copy_to="$(cygpath -w "$work/db.sqlite3" 2>/dev/null || echo "$work/db.sqlite3")"
+  "$PY" manage.py shell -c "
+import sqlite3
+from django.db import connection
+connection.ensure_connection()
+copy = sqlite3.connect(r'$copy_to')
+connection.connection.backup(copy)
+copy.close()
+" >/dev/null
+  files+=(db.sqlite3)
+elif command -v pg_dump >/dev/null; then
+  # On PostgreSQL, a native dump (pg_restore can load it into any PostgreSQL server).
   PGPASSWORD="${DB_PASSWORD:-}" pg_dump --format=custom --no-owner     --host="${DB_HOST:-localhost}" --port="${DB_PORT:-5432}" --username="${DB_USER:-m3m}"     --file="$work/database.dump" "${DB_NAME:-m3m}"
   files+=(database.dump)
 fi

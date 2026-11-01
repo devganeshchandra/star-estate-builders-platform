@@ -1,36 +1,71 @@
 from django.core.cache import cache
+from django.core.validators import RegexValidator
 from django.db import models
 from django.urls import reverse
 
 from core.images import ResizingImageField
+from tenants.query import BuilderUploadTo, TenantQuerySet
+
+# The field defaults below were written for the first builder. A new builder's row starts from the same
+# defaults with these names replaced by its own (SingletonModel.create_for).
+FIRST_BUILDER_NAMES = ("M3M India", "M3M")
+
+
+def rename_first_builder(text, builder):
+    for name in FIRST_BUILDER_NAMES:
+        text = text.replace(name, builder.name)
+    return text
+
+
+# Branding values are written into the page's CSS, so only plain values are accepted.
+HEX_COLOR = RegexValidator(r"^#[0-9A-Fa-f]{6}$", "Enter a colour as # and six hex digits, e.g. #172b46.")
+FONT_NAME = RegexValidator(r"^[A-Za-z0-9 ]{2,60}$", "Enter a Google Fonts family name, e.g. Playfair Display.")
 
 
 class SingletonModel(models.Model):
-    """A model with exactly one row, edited from the admin as a single form."""
+    """One row per builder (its settings, homepage text…), edited from the admin as a single form."""
 
-    cache_key = None
+    builder = models.OneToOneField("tenants.Builder", on_delete=models.PROTECT, related_name="+")
+    tenant_path = "builder"
+    # Fields a new builder starts with empty instead of the first builder's values (phone numbers, address…).
+    blank_for_new_builder = ()
+
+    objects = TenantQuerySet.as_manager()
 
     class Meta:
         abstract = True
 
     def save(self, *args, **kwargs):
-        self.pk = 1
         super().save(*args, **kwargs)
-        cache.delete(self.get_cache_key())
+        cache.delete(self.get_cache_key(self.builder_id))
 
     def delete(self, *args, **kwargs):
         pass
 
     @classmethod
-    def get_cache_key(cls):
-        return cls.cache_key or f"singleton:{cls._meta.label_lower}"
+    def get_cache_key(cls, builder_id):
+        return f"singleton:{cls._meta.label_lower}:{builder_id}"
 
     @classmethod
-    def load(cls):
-        obj = cache.get(cls.get_cache_key())
+    def load(cls, builder):
+        """This builder's row, created with starting values the first time it is needed."""
+        key = cls.get_cache_key(builder.pk)
+        obj = cache.get(key)
         if obj is None:
-            obj, _ = cls.objects.get_or_create(pk=1)
-            cache.set(cls.get_cache_key(), obj, 300)
+            obj = cls.objects.filter(builder=builder).first() or cls.create_for(builder)
+            cache.set(key, obj, 300)
+        return obj
+
+    @classmethod
+    def create_for(cls, builder):
+        values = {}
+        if builder.name not in FIRST_BUILDER_NAMES:  # The defaults were written for the first builder.
+            for field in cls._meta.concrete_fields:
+                default = field.get_default() if field.has_default() else None
+                if isinstance(default, str):
+                    values[field.name] = rename_first_builder(default, builder)
+            values.update({name: "" for name in cls.blank_for_new_builder})
+        obj, _ = cls.objects.get_or_create(builder=builder, defaults=values)
         return obj
 
 
@@ -46,7 +81,7 @@ class SiteSettings(SingletonModel):
         help_text="Shown in Google results and social shares.",
     )
     share_image = ResizingImageField(
-        upload_to="site/",
+        upload_to=BuilderUploadTo("site"),
         blank=True,
         help_text="Default image for WhatsApp / social shares (1200×630 recommended).",
     )
@@ -108,6 +143,49 @@ class SiteSettings(SingletonModel):
     enquiry_success_message = models.TextField(
         default="Thank you. Your details have been received and our team will be in touch shortly.",
         help_text="Shown to visitors after they submit any enquiry form.",
+    )
+    lead_notification_emails = models.TextField(
+        blank=True,
+        help_text="Addresses that get an email for every new lead on this builder's websites, separated by commas.",
+    )
+
+    # Branding. Empty values leave the design exactly as its stylesheet defines it.
+    logo = ResizingImageField(upload_to=BuilderUploadTo("branding"), blank=True, help_text="Main logo (PNG or WebP).")
+    logo_light = ResizingImageField(
+        upload_to=BuilderUploadTo("branding"),
+        blank=True,
+        help_text="Light version for the transparent header over banner pictures. Defaults to the main logo.",
+    )
+    favicon = models.ImageField(
+        upload_to=BuilderUploadTo("branding"), blank=True, help_text="Square PNG, at least 96 × 96 px."
+    )
+    primary_color = models.CharField(
+        max_length=7, blank=True, validators=[HEX_COLOR], help_text="Main text and dark backgrounds, e.g. #172b46. Empty: the design's own."
+    )
+    secondary_color = models.CharField(
+        max_length=7, blank=True, validators=[HEX_COLOR], help_text="Accent colour for highlights and buttons, e.g. #c5983c."
+    )
+    font_heading = models.CharField(
+        max_length=60, blank=True, validators=[FONT_NAME], help_text="A Google Fonts family for headings, e.g. “Playfair Display”."
+    )
+    font_body = models.CharField(max_length=60, blank=True, validators=[FONT_NAME], help_text="A Google Fonts family for text, e.g. “Inter”.")
+
+    # Social links (shown where the design has a place for them)
+    facebook_url = models.URLField(blank=True)
+    instagram_url = models.URLField(blank=True)
+    linkedin_url = models.URLField(blank=True)
+    youtube_url = models.URLField(blank=True)
+    x_url = models.URLField("X (Twitter) URL", blank=True)
+
+    # Marketing tags, added to every page when filled in
+    gtm_id = models.CharField("Google Tag Manager ID", max_length=20, blank=True, help_text="e.g. GTM-ABC1234")
+    ga4_id = models.CharField("Google Analytics 4 ID", max_length=20, blank=True, help_text="e.g. G-ABC123XYZ9")
+    meta_pixel_id = models.CharField("Meta pixel ID", max_length=20, blank=True, help_text="Digits only.")
+
+    tenant_area = "settings"  # Only builder admins change the contact details, branding and tags.
+    blank_for_new_builder = (
+        "phone_display", "phone_dial", "phone_international", "whatsapp_number", "address_line_1", "address_line_2",
+        "street_address", "city", "postal_code", "email", "map_embed_url",
     )
 
     class Meta:
@@ -216,6 +294,8 @@ class HomePage(SingletonModel):
         max_length=120, default="Considered spaces. Personal conversations."
     )
 
+    blank_for_new_builder = ("journey_link_url",)
+
     class Meta:
         verbose_name = "Homepage text"
         verbose_name_plural = "Homepage text"
@@ -234,9 +314,14 @@ class HomePage(SingletonModel):
 
 
 class HeroBanner(models.Model):
-    image = ResizingImageField(upload_to="banners/", help_text="Wide landscape image, at least 2000px wide.")
+    builder = models.ForeignKey("tenants.Builder", on_delete=models.PROTECT, related_name="+")
+    tenant_path = "builder"
+
+    objects = TenantQuerySet.as_manager()
+
+    image = ResizingImageField(upload_to=BuilderUploadTo("banners"), help_text="Wide landscape image, at least 2000px wide.")
     video = models.FileField(
-        upload_to="banners/",
+        upload_to=BuilderUploadTo("banners"),
         blank=True,
         help_text="Optional silent MP4 loop. Plays in place of the image, which shows while it loads.",
     )
@@ -255,8 +340,13 @@ class HeroBanner(models.Model):
 class Page(models.Model):
     """Simple text pages such as Privacy, Disclaimer and Compliance."""
 
+    builder = models.ForeignKey("tenants.Builder", on_delete=models.PROTECT, related_name="+")
+    tenant_path = "builder"
+
+    objects = TenantQuerySet.as_manager()
+
     title = models.CharField(max_length=120)
-    slug = models.SlugField(unique=True, help_text="The page address, e.g. “privacy” → /privacy")
+    slug = models.SlugField(help_text="The page address, e.g. “privacy” → /privacy")
     body = models.TextField(help_text="Plain text. Leave a blank line between paragraphs.")
     meta_description = models.CharField(max_length=255, blank=True)
     is_published = models.BooleanField(default=False)
@@ -264,6 +354,7 @@ class Page(models.Model):
 
     class Meta:
         ordering = ["title"]
+        constraints = [models.UniqueConstraint(fields=["builder", "slug"], name="core_page_unique_slug_per_builder")]
 
     def __str__(self):
         return self.title
@@ -274,6 +365,11 @@ class Page(models.Model):
 
 class InnerPage(models.Model):
     """Banner, headings and SEO text for each page in the main menu."""
+
+    builder = models.ForeignKey("tenants.Builder", on_delete=models.PROTECT, related_name="+")
+    tenant_path = "builder"
+
+    objects = TenantQuerySet.as_manager()
 
     class Key(models.TextChoices):
         PROJECTS = "projects", "Projects"
@@ -290,10 +386,10 @@ class InnerPage(models.Model):
         Key.CONTACT: "core:contact",
     }
 
-    key = models.CharField(max_length=20, choices=Key.choices, unique=True, editable=False)
+    key = models.CharField(max_length=20, choices=Key.choices, editable=False)
 
     # Banner
-    banner = ResizingImageField(upload_to="page-banners/", help_text="Wide image, at least 1600px wide.")
+    banner = ResizingImageField(upload_to=BuilderUploadTo("page-banners"), help_text="Wide image, at least 1600px wide.")
     banner_alt = models.CharField(max_length=160, blank=True)
     eyebrow = models.CharField(max_length=80, help_text="Small text above the title.")
     title = models.CharField(max_length=80)
@@ -325,11 +421,11 @@ class InnerPage(models.Model):
         help_text="Shown under the contact details, one card per line: title | short text. Leave empty to hide.",
     )
     info_image = ResizingImageField(
-        upload_to="page-banners/", blank=True, help_text="Shown under the contact details, beside the form."
+        upload_to=BuilderUploadTo("page-banners"), blank=True, help_text="Shown under the contact details, beside the form."
     )
     info_image_alt = models.CharField(max_length=160, blank=True)
     faq_image = ResizingImageField(
-        upload_to="page-banners/", blank=True, help_text="Shown under the “Frequently asked” heading."
+        upload_to=BuilderUploadTo("page-banners"), blank=True, help_text="Shown under the “Frequently asked” heading."
     )
     faq_image_alt = models.CharField(max_length=160, blank=True)
 
@@ -339,6 +435,7 @@ class InnerPage(models.Model):
 
     class Meta:
         ordering = ["id"]
+        constraints = [models.UniqueConstraint(fields=["builder", "key"], name="core_innerpage_unique_key_per_builder")]
         verbose_name = "Menu page (banner & text)"
         verbose_name_plural = "Menu pages (banners & text)"
 
@@ -349,8 +446,8 @@ class InnerPage(models.Model):
         return reverse(self.URL_NAMES[self.key])
 
     @classmethod
-    def for_key(cls, key):
-        return cls.objects.filter(key=key).first()
+    def for_key(cls, builder, key):
+        return cls.objects.for_builder(builder).filter(key=key).first()
 
     @property
     def form_source(self):
@@ -368,6 +465,11 @@ class InnerPage(models.Model):
 
 
 class FAQ(models.Model):
+    builder = models.ForeignKey("tenants.Builder", on_delete=models.PROTECT, related_name="+")
+    tenant_path = "builder"
+
+    objects = TenantQuerySet.as_manager()
+
     question = models.CharField(max_length=200)
     answer = models.TextField()
     order = models.PositiveIntegerField(default=0)

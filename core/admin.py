@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth.admin import GroupAdmin as BaseGroupAdmin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
@@ -8,9 +9,11 @@ from unfold.admin import ModelAdmin
 from unfold.forms import AdminPasswordChangeForm, UserChangeForm, UserCreationForm
 
 from core.models import FAQ, HeroBanner, HomePage, InnerPage, Page, SiteSettings
+from tenants.admin import BuilderMembershipInline
+from tenants.admin_scoping import TenantScopedAdmin
 
-admin.site.site_header = "M3M India"
-admin.site.site_title = "M3M India Admin"
+admin.site.site_header = settings.PLATFORM_NAME
+admin.site.site_title = f"{settings.PLATFORM_NAME} admin"
 admin.site.index_title = "Website content & enquiries"
 
 admin.site.unregister(User)
@@ -19,6 +22,7 @@ admin.site.unregister(Group)
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin, ModelAdmin):
+    inlines = [BuilderMembershipInline]
     form = UserChangeForm
     add_form = UserCreationForm
     change_password_form = AdminPasswordChangeForm
@@ -29,19 +33,29 @@ class GroupAdmin(BaseGroupAdmin, ModelAdmin):
     pass
 
 
-class SingletonAdmin(ModelAdmin):
-    """Skip the list page and open the single settings form directly."""
+class SingletonAdmin(TenantScopedAdmin, ModelAdmin):
+    """One row per builder. Someone working for one builder goes straight to its form; a superuser picks the
+    builder from the list."""
+
+    list_display = ["__str__", "builder"]
+    # Rows are created with starting values when a builder first needs one; False for pages only some builders have.
+    create_missing = True
 
     def has_add_permission(self, request):
-        return not self.model.objects.exists()
+        return False
 
     def has_delete_permission(self, request, obj=None):
         return False
 
     def changelist_view(self, request, extra_context=None):
-        obj = self.model.load()
-        opts = self.model._meta
-        return redirect(reverse(f"admin:{opts.app_label}_{opts.model_name}_change", args=[obj.pk]))
+        builders = list(self._builders(request)[:2])
+        if len(builders) == 1:
+            builder = builders[0]
+            obj = self.model.load(builder) if self.create_missing else self.model.objects.filter(builder=builder).first()
+            if obj is not None:
+                opts = self.model._meta
+                return redirect(reverse(f"admin:{opts.app_label}_{opts.model_name}_change", args=[obj.pk]))
+        return super().changelist_view(request, extra_context)
 
 
 @admin.register(SiteSettings)
@@ -54,8 +68,17 @@ class SiteSettingsAdmin(SingletonAdmin):
             {"fields": ["address_line_1", "address_line_2", "street_address", "city", "postal_code"]},
         ),
         ("Search engines & sharing", {"fields": ["site_name", "default_title", "meta_description", "share_image"]}),
-        ("Enquiry forms", {"fields": ["enquiry_success_message"]}),
+        ("Enquiry forms", {"fields": ["enquiry_success_message", "lead_notification_emails"]}),
         ("Footer", {"fields": ["footer_disclaimer", "footer_note"]}),
+        (
+            "Branding",
+            {
+                "fields": ["logo", "logo_light", "favicon", ("primary_color", "secondary_color"), ("font_heading", "font_body")],
+                "description": "Leave a field empty to keep the design's own logo text, colours and fonts.",
+            },
+        ),
+        ("Social links", {"fields": ["facebook_url", "instagram_url", "linkedin_url", "youtube_url", "x_url"], "classes": ["collapse"]}),
+        ("Marketing tags", {"fields": ["gtm_id", "ga4_id", "meta_pixel_id"], "classes": ["collapse"]}),
     ]
 
 
@@ -113,13 +136,13 @@ class HomePageAdmin(SingletonAdmin):
 
 
 @admin.register(HeroBanner)
-class HeroBannerAdmin(ModelAdmin):
+class HeroBannerAdmin(TenantScopedAdmin, ModelAdmin):
     list_display = ["__str__", "order", "is_active"]
     list_editable = ["order", "is_active"]
 
 
 @admin.register(Page)
-class PageAdmin(ModelAdmin):
+class PageAdmin(TenantScopedAdmin, ModelAdmin):
     list_display = ["title", "slug", "is_published", "updated_at"]
     list_editable = ["is_published"]
     prepopulated_fields = {"slug": ["title"]}
@@ -127,8 +150,8 @@ class PageAdmin(ModelAdmin):
 
 
 @admin.register(InnerPage)
-class InnerPageAdmin(ModelAdmin):
-    list_display = ["__str__", "title", "updated_at"]
+class InnerPageAdmin(TenantScopedAdmin, ModelAdmin):
+    list_display = ["__str__", "title", "builder", "updated_at"]
 
     HERO = ("Banner", {"fields": ["banner", "banner_alt", "eyebrow", "title", "title_emphasis", "intro"]})
     FORM = ("Form beside the banner", {"fields": ["form_title", "form_intro"]})
@@ -163,6 +186,6 @@ class InnerPageAdmin(ModelAdmin):
 
 
 @admin.register(FAQ)
-class FAQAdmin(ModelAdmin):
+class FAQAdmin(TenantScopedAdmin, ModelAdmin):
     list_display = ["question", "order", "is_published"]
     list_editable = ["order", "is_published"]

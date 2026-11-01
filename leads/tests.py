@@ -6,6 +6,7 @@ from django.urls import reverse
 from leads import validation
 from leads.models import Enquiry
 from projects.models import Project
+from tenants.models import Builder
 
 
 class ValidationTests(TestCase):
@@ -35,6 +36,7 @@ class SubmitEnquiryTests(TestCase):
     def setUp(self):
         cache.clear()
         self.project = Project.objects.create(
+            builder=Builder.objects.get(slug="m3m"),
             name="Test Tower", slug="test-tower", category="M3M", is_residential=True,
             offering="3 BHK", location="Sector 1", rera="RERA1", image="projects/x.jpg", summary="Test",
         )
@@ -89,6 +91,31 @@ class SubmitEnquiryTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("callTime", response.json()["errors"])
+
+    def test_ad_click_details_are_saved(self):
+        self.post(
+            source="hero", name="Asha Verma", phone="9876543210", email="asha@example.com", callTime="morning",
+            utm_source="google", utm_medium="cpc", utm_campaign="noida-luxury", utm_content="ad-1",
+            gclid="Cj0KCQ-test", matchtype="e", fbclid="", device="m", city="Noida",
+            keyword="luxury flats noida", tbcli="TB-123",  # the old site's names
+        )
+        enquiry = Enquiry.objects.get()
+        self.assertEqual(
+            (enquiry.utm_term, enquiry.gclid, enquiry.matchtype, enquiry.tbclid, enquiry.device, enquiry.city),
+            ("luxury flats noida", "Cj0KCQ-test", "e", "TB-123", "mobile", "Noida"),
+        )
+
+    def test_device_comes_from_the_browser_and_long_values_never_lose_a_lead(self):
+        response = self.client.post(
+            self.url,
+            dict(source="hero", name="Asha Verma", phone="9876543210", email="asha@example.com", callTime="morning",
+                 utm_campaign="x" * 500, gclid="g" * 600),
+            HTTP_USER_AGENT="Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile/15E148",
+        )
+        self.assertTrue(response.json()["ok"])
+        enquiry = Enquiry.objects.get()
+        self.assertEqual(enquiry.device, "mobile")
+        self.assertEqual((len(enquiry.utm_campaign), len(enquiry.gclid)), (120, 255))
 
     def test_brochure_needs_only_name_and_phone(self):
         response = self.post(source="brochure", name="Asha Verma", phone="9876543210")
@@ -185,7 +212,7 @@ class LandingLeadTests(TestCase):
 
     def setUp(self):
         cache.clear()
-        common = dict(category="M3M Jacob & Co.", location="Sector 97", rera="R1", image="projects/x.jpg", summary="S")
+        common = dict(builder=Builder.objects.get(slug="m3m"), category="M3M Jacob & Co.", location="Sector 97", rera="R1", image="projects/x.jpg", summary="S")
         self.residences = Project.objects.create(name="Residences", slug="res", is_residential=True, offering="3 BHK", **common)
         self.retail = Project.objects.create(name="Retail", slug="retail", is_commercial=True, offering="Shops", **common)
 
@@ -204,6 +231,31 @@ class LandingLeadTests(TestCase):
         self.assertEqual((enquiry.source, enquiry.interest, enquiry.project), ("landing", "residential", self.residences))
         self.assertEqual(enquiry.message, "Requested: Unlock the brochure")
         self.assertEqual(enquiry.utm_source, "facebook")
+
+    def test_lead_for_names_the_website_the_lead_came_from(self):
+        cullinan = Project.objects.create(
+            builder=Builder.objects.get(slug="m3m"),
+            name="Cullinan", slug="cullinan", category="M3M The Cullinan", is_residential=True, offering="4 BHK",
+            location="Sector 94", rera="R2", image="projects/x.jpg", summary="S",
+        )
+        trump = Project.objects.create(
+            builder=Builder.objects.get(slug="m3m"),
+            name="Trump", slug="trump", category="M3M Trump Tower", is_residential=True, offering="4 BHK",
+            location="Sector 94", rera="R3", image="projects/x.jpg", summary="S",
+        )
+        self.post()
+        self.post(project="cullinan", phone="9876543211")
+        self.post(project="trump", phone="9876543212")
+        self.post(source="billionaire", phone="+971501234567")
+        self.post(source="popup", project="trump", phone="9876543213", callTime="evening", consent="on")
+        self.post(source="hero", phone="9876543214", callTime="morning")
+        self.assertEqual(
+            list(Enquiry.objects.order_by("created_at").values_list("lead_for", flat=True)),
+            ["jacob", "cullinan", "trump", "billionaire", "core", "core"],
+        )
+        # The main website's popup still records the project the customer asked about.
+        self.assertEqual(Enquiry.objects.get(phone="+919876543213").project, trump)
+        self.assertTrue(cullinan.enquiries.exists())
 
     def test_commercial_lead_is_filed_against_the_commercial_project(self):
         self.post(interest="commercial", project="retail")

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Set up the M3M India website on a new machine.
+# Set up the builder websites platform on a new machine.
 #
 #   ./scripts/setup.sh                                   # development (your laptop)
-#   ./scripts/setup.sh --production --domain www.m3mindia.com
+#   ./scripts/setup.sh --production --domain m3mhome.in
 #
 # Works on Ubuntu/Debian (installs what it needs with apt), other Linux and
 # macOS with Python 3.12+, and Git Bash on Windows. Safe to run again: it
@@ -115,9 +115,10 @@ else
   if [[ "$MODE" == "production" ]]; then
     bare="${DOMAIN#www.}"
     set_env DJANGO_DEBUG 0
+    # Add every further builder domain to these two lines (see docs/ENVIRONMENT_SETUP.md).
     set_env DJANGO_ALLOWED_HOSTS "$bare,www.$bare,localhost,127.0.0.1"
     set_env DJANGO_CSRF_TRUSTED_ORIGINS "https://$bare,https://www.$bare"
-    set_env SITE_URL "https://$DOMAIN"
+    set_env PLATFORM_ADMIN_HOSTS ""
   else
     set_env DJANGO_DEBUG 1
   fi
@@ -153,9 +154,9 @@ if [[ "$(env_value DB_ENGINE)" =~ ^postgres && -z "$(env_value DB_PASSWORD)" ]];
     echo "Install PostgreSQL, create a database and login (see docs/DATABASE.md), put them in .env, then run this script again." >&2
     exit 1
   else
-    set_env DB_ENGINE sqlite
-    echo "PostgreSQL is not set up on this machine: using a local SQLite file for development."
-    echo "To use PostgreSQL here, follow docs/DATABASE.md and set the DB_* lines in .env."
+    echo "PostgreSQL is not set up on this machine. Install PostgreSQL (or run: docker compose up -d), put" >&2
+    echo "its database and login in .env (DB_* lines), then run this script again. See docs/LOCAL_SETUP.md." >&2
+    exit 1
   fi
 fi
 
@@ -173,6 +174,11 @@ if "$VENV_PY" manage.py shell -v0 -c "import sys; from projects.models import Pr
 else
   step "Loading the starter website content"
   "$VENV_PY" manage.py seed_content
+fi
+
+if [[ "$MODE" != "production" ]]; then
+  step "Local addresses for each builder (localhost, m3m.localhost …)"
+  "$VENV_PY" manage.py add_local_domains
 fi
 
 # 5. Admin account ------------------------------------------------------------
@@ -196,6 +202,7 @@ else
   cat <<EOF
 Start the site with:
   $VENV_PY manage.py runserver
-Then open http://127.0.0.1:8000/ (admin: http://127.0.0.1:8000/admin/)
+Then open http://localhost:8000/ or http://m3m.localhost:8000/ (admin: http://localhost:8000/admin/).
+Other builders: http://<builder>.localhost:8000/ (sample builders: manage.py add_local_domains --demo).
 EOF
 fi

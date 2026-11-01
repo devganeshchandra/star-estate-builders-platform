@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block title %}Styleguide | {{ site.site_name }}{% endblock %}
-{% block description %}The visual language and interface foundations for M3M India.{% endblock %}
+{% block description %}The visual language and interface foundations for {{ site.site_name }}.{% endblock %}
 {% block robots %}<meta name="robots" content="noindex, nofollow">{% endblock %}
 
 {% block content %}
@@ -74,7 +74,7 @@
         </div>
         <label class="consent-field">
           <input name="consent" type="checkbox">
-          <span>I agree to be contacted about M3M India projects.</span>
+          <span>I agree to be contacted about {{ site.site_name }} projects.</span>
         </label>
       </form>
     </div>
