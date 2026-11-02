@@ -531,8 +531,7 @@
 
   /* ---------- Enquiry form heading: letters quiver like a plucked string ---------- */
 
-  // Used by the banner form heading, the homepage projects heading and the
-  // homepage project names. Every heading inside one [data-quiver-box] quivers
+  // Used by the banner form heading on inner pages. Every heading inside one [data-quiver-box] quivers
   // together, letter after letter. A box quivers when it comes into view, every
   // few seconds while it stays in view (boxes take turns), and on hover.
   function initQuiverTitle() {

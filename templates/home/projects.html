@@ -7,10 +7,10 @@
           <span class="section-label__rule"></span>
           {{ page.projects_label }}
         </p>
-        <h2 class="projects-section__title" id="projects-title" data-title-reveal data-quiver-box>
-          <span class="title-mask"><span class="title-rise" data-quiver-title>{{ page.projects_title_line_1 }}</span></span>
+        <h2 class="projects-section__title" id="projects-title" data-title-reveal>
+          <span class="title-mask"><span class="title-rise">{{ page.projects_title_line_1 }}</span></span>
           <br>
-          <span class="title-mask"><em class="title-rise" data-quiver-title>{{ page.projects_title_line_2 }}</em></span>
+          <span class="title-mask"><em class="title-rise">{{ page.projects_title_line_2 }}</em></span>
         </h2>
       </div>
       {% include "partials/section_intro.html" with facts=projects_facts text=page.projects_intro %}
@@ -24,7 +24,7 @@
 
     <div class="projects-grid">
       {% for project in projects %}
-        {% include "partials/project_card.html" with number=forloop.counter quiver=True %}
+        {% include "partials/project_card.html" with number=forloop.counter %}
       {% endfor %}
     </div>
 

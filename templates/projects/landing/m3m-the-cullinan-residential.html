@@ -69,8 +69,8 @@
       </h1>
       <p class="cl-hero__line cl-in">{{ t.hero_line|em }}</p>
 
-      <div class="cl-hero__form cl-in" id="cl-hero-form" data-quiver-box>
-        <p class="cl-hero__form-title"><span data-quiver-title>{{ t.hero_form_title }}</span> <span class="cl-hero__form-more">{{ t.hero_form_title_more }}</span></p>
+      <div class="cl-hero__form cl-in" id="cl-hero-form">
+        <p class="cl-hero__form-title"><span>{{ t.hero_form_title }}</span> <span class="cl-hero__form-more">{{ t.hero_form_title_more }}</span></p>
         {% include "projects/landing/_cullinan_form.html" with prefix="hero" button=t.hero_form_button %}
       </div>
     </div>

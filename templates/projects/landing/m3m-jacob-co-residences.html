@@ -88,10 +88,9 @@
 
       <div class="jl-hero__side">
       {% include "projects/landing/_rera_badge.html" with theme="jl" %}
-      {# Heading letters quiver every few seconds and on hover, like the homepage form (site.js initQuiverTitle). #}
-      <aside class="jl-hero__card jl-rise" aria-labelledby="jl-hero-form-title" data-quiver-box>
+      <aside class="jl-hero__card jl-rise" aria-labelledby="jl-hero-form-title">
         <p class="jl-card__eyebrow"><span class="jl-dot" aria-hidden="true"></span>{{ t.card_eyebrow }}</p>
-        <h2 class="jl-card__title" id="jl-hero-form-title" data-quiver-title>{{ t.card_title }}</h2>
+        <h2 class="jl-card__title" id="jl-hero-form-title">{{ t.card_title }}</h2>
         <svg class="quiver-string" viewBox="0 0 200 12" preserveAspectRatio="none" aria-hidden="true" focusable="false">
           <path d="M2 6 Q 100 6 198 6"/>
         </svg>
